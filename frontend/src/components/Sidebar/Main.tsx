@@ -1,5 +1,4 @@
 import { Link as RouterLink, useRouterState } from "@tanstack/react-router";
-import type { LucideIcon } from "lucide-react";
 import { ChevronRight } from "lucide-react";
 
 import {
@@ -18,20 +17,10 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
-
-export type SubItem = {
-  title: string;
-  path: string;
-};
-export type Item = {
-  icon: LucideIcon;
-  title: string;
-  path: string;
-  subItems?: SubItem[];
-};
+import type { NavItem } from "@/config/navigation";
 
 interface MainProps {
-  items: Item[];
+  items: NavItem[];
 }
 
 export function Main({ items }: MainProps) {
@@ -52,30 +41,23 @@ export function Main({ items }: MainProps) {
           {items.map((item) => {
             const isActive = currentPath === item.path;
 
-            return (
-              <Collapsible
-                asChild
-                defaultOpen={false}
-                className="group/collapsible"
-                key={item.title}
-              >
-                <SidebarMenuItem>
-                  <CollapsibleTrigger asChild>
-                    <SidebarMenuButton
-                      tooltip={item.title}
-                      isActive={isActive}
-                      asChild
-                    >
-                      <RouterLink to={item.path} onClick={handleMenuClick}>
+            // Items WITH subItems - toggle dropdown only
+            if (item.subItems) {
+              return (
+                <Collapsible
+                  asChild
+                  defaultOpen={false}
+                  className="group/collapsible"
+                  key={item.title}
+                >
+                  <SidebarMenuItem>
+                    <CollapsibleTrigger asChild>
+                      <SidebarMenuButton tooltip={item.title} isActive={isActive}>
                         <item.icon />
                         <span>{item.title}</span>
-                        {item.subItems && (
-                          <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
-                        )}
-                      </RouterLink>
-                    </SidebarMenuButton>
-                  </CollapsibleTrigger>
-                  {item.subItems && (
+                        <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+                      </SidebarMenuButton>
+                    </CollapsibleTrigger>
                     <CollapsibleContent>
                       <SidebarMenuSub>
                         {item.subItems.map((subItem) => (
@@ -92,9 +74,21 @@ export function Main({ items }: MainProps) {
                         ))}
                       </SidebarMenuSub>
                     </CollapsibleContent>
-                  )}
-                </SidebarMenuItem>
-              </Collapsible>
+                  </SidebarMenuItem>
+                </Collapsible>
+              );
+            }
+
+            // Items WITHOUT subItems - navigate
+            return (
+              <SidebarMenuItem key={item.title}>
+                <SidebarMenuButton tooltip={item.title} isActive={isActive} asChild>
+                  <RouterLink to={item.path} onClick={handleMenuClick}>
+                    <item.icon />
+                    <span>{item.title}</span>
+                  </RouterLink>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             );
           })}
         </SidebarMenu>
