@@ -1,23 +1,23 @@
 import {
+  ChartSpline,
   Folder,
   Home,
-  Play,
-  ChartSpline,
-  Users,
   type LucideIcon,
-} from "lucide-react";
+  Play,
+  Users,
+} from "lucide-react"
 
 export type SubItem = {
-  title: string;
-  path: string;
-};
+  title: string
+  path: string
+}
 
 export type NavItem = {
-  icon: LucideIcon;
-  title: string;
-  path: string;
-  subItems?: SubItem[];
-};
+  icon: LucideIcon
+  title: string
+  path: string
+  subItems?: SubItem[]
+}
 
 export const sidebarItems: NavItem[] = [
   { icon: Home, title: "Home", path: "/" },
@@ -50,8 +50,8 @@ export const sidebarItems: NavItem[] = [
       { title: "Image Query", path: "/analyze/image_query" },
     ],
   },
-];
+]
 
 export const adminItems: NavItem[] = [
   { icon: Users, title: "Admin", path: "/admin" },
-];
+]

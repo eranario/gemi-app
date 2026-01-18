@@ -1,22 +1,22 @@
-import { SidebarAppearance } from "@/components/Common/Appearance";
-import { Logo } from "@/components/Common/Logo";
+import { SidebarAppearance } from "@/components/Common/Appearance"
+import { Logo } from "@/components/Common/Logo"
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarHeader,
-} from "@/components/ui/sidebar";
-import { sidebarItems, adminItems } from "@/config/navigation";
-import useAuth from "@/hooks/useAuth";
-import { Main } from "./Main";
-import { User } from "./User";
+} from "@/components/ui/sidebar"
+import { adminItems, sidebarItems } from "@/config/navigation"
+import useAuth from "@/hooks/useAuth"
+import { Main } from "./Main"
+import { User } from "./User"
 
 export function AppSidebar() {
-  const { user: currentUser } = useAuth();
+  const { user: currentUser } = useAuth()
 
   const items = currentUser?.is_superuser
     ? [...sidebarItems, ...adminItems]
-    : sidebarItems;
+    : sidebarItems
 
   return (
     <Sidebar collapsible="icon">
@@ -31,7 +31,7 @@ export function AppSidebar() {
         <User user={currentUser} />
       </SidebarFooter>
     </Sidebar>
-  );
+  )
 }
 
-export default AppSidebar;
+export default AppSidebar

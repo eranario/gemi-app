@@ -1,12 +1,12 @@
-import { Link } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router"
 
-import { cn } from "@/lib/utils";
-import icon from "/assets/images/gemi-icon.png";
+import { cn } from "@/lib/utils"
+import icon from "/assets/images/gemi-icon.png"
 
 interface LogoProps {
-  variant?: "full" | "icon" | "responsive";
-  className?: string;
-  asLink?: boolean;
+  variant?: "full" | "icon" | "responsive"
+  className?: string
+  asLink?: boolean
 }
 
 export function Logo({
@@ -29,11 +29,11 @@ export function Logo({
       </div>
     ) : (
       <img src={icon} alt="GEMI" className={cn("size-10", className)} />
-    );
+    )
 
   if (!asLink) {
-    return content;
+    return content
   }
 
-  return <Link to="/">{content}</Link>;
+  return <Link to="/">{content}</Link>
 }

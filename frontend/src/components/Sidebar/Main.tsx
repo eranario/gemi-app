@@ -1,45 +1,44 @@
-import { Link as RouterLink, useRouterState } from "@tanstack/react-router";
-import { ChevronRight } from "lucide-react";
-
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@radix-ui/react-collapsible";
+} from "@radix-ui/react-collapsible"
+import { Link as RouterLink, useRouterState } from "@tanstack/react-router"
+import { ChevronRight } from "lucide-react"
 import {
   SidebarGroup,
   SidebarGroupContent,
   SidebarMenu,
-  SidebarMenuSub,
-  SidebarMenuSubItem,
-  SidebarMenuSubButton,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   useSidebar,
-} from "@/components/ui/sidebar";
-import type { NavItem } from "@/config/navigation";
+} from "@/components/ui/sidebar"
+import type { NavItem } from "@/config/navigation"
 
 interface MainProps {
-  items: NavItem[];
+  items: NavItem[]
 }
 
 export function Main({ items }: MainProps) {
-  const { isMobile, setOpenMobile } = useSidebar();
-  const router = useRouterState();
-  const currentPath = router.location.pathname;
+  const { isMobile, setOpenMobile } = useSidebar()
+  const router = useRouterState()
+  const currentPath = router.location.pathname
 
   const handleMenuClick = () => {
     if (isMobile) {
-      setOpenMobile(false);
+      setOpenMobile(false)
     }
-  };
+  }
 
   return (
     <SidebarGroup>
       <SidebarGroupContent>
         <SidebarMenu>
           {items.map((item) => {
-            const isActive = currentPath === item.path;
+            const isActive = currentPath === item.path
 
             // Items WITH subItems - toggle dropdown only
             if (item.subItems) {
@@ -52,7 +51,10 @@ export function Main({ items }: MainProps) {
                 >
                   <SidebarMenuItem>
                     <CollapsibleTrigger asChild>
-                      <SidebarMenuButton tooltip={item.title} isActive={isActive}>
+                      <SidebarMenuButton
+                        tooltip={item.title}
+                        isActive={isActive}
+                      >
                         <item.icon />
                         <span>{item.title}</span>
                         <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
@@ -76,23 +78,27 @@ export function Main({ items }: MainProps) {
                     </CollapsibleContent>
                   </SidebarMenuItem>
                 </Collapsible>
-              );
+              )
             }
 
             // Items WITHOUT subItems - navigate
             return (
               <SidebarMenuItem key={item.title}>
-                <SidebarMenuButton tooltip={item.title} isActive={isActive} asChild>
+                <SidebarMenuButton
+                  tooltip={item.title}
+                  isActive={isActive}
+                  asChild
+                >
                   <RouterLink to={item.path} onClick={handleMenuClick}>
                     <item.icon />
                     <span>{item.title}</span>
                   </RouterLink>
                 </SidebarMenuButton>
               </SidebarMenuItem>
-            );
+            )
           })}
         </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>
-  );
+  )
 }

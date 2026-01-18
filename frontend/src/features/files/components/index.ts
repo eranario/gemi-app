@@ -1,5 +1,5 @@
-export { TextField } from "./TextField";
-export { DataStructureForm } from "./DataStructureForm";
-export { UploadZone } from "./UploadZone";
-export { UploadList } from "./UploadList";
-export { DataTypes } from "./DataTypes";
+export { DataStructureForm } from "./DataStructureForm"
+export { DataTypes } from "./DataTypes"
+export { TextField } from "./TextField"
+export { UploadList } from "./UploadList"
+export { UploadZone } from "./UploadZone"

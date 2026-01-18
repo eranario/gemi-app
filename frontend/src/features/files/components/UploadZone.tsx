@@ -1,5 +1,6 @@
 import { useState, useRef, DragEvent, ChangeEvent } from "react";
 import { Upload, Image } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface UploadZoneProps {
   onFilesAdded?: (files: FileList | File[]) => void;
@@ -47,6 +48,13 @@ export function UploadZone({ onFilesAdded }: UploadZoneProps) {
 
       <div
         onClick={handleClick}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            handleClick();
+          }
+        }}
+        role="button"
+        tabIndex={0}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}

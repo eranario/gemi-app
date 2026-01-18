@@ -1,22 +1,25 @@
-import { FolderTree } from "lucide-react";
-import { TextField } from "./TextField";
+import { FolderTree } from "lucide-react"
+import { TextField } from "./TextField"
 
 interface DataStructureFormProps {
   values?: {
-    experiment?: string;
-    location?: string;
-    population?: string;
-    date?: string;
-    platform?: string;
-    sensor?: string;
-  };
-  onChange?: (field: string, value: string) => void;
+    experiment?: string
+    location?: string
+    population?: string
+    date?: string
+    platform?: string
+    sensor?: string
+  }
+  onChange?: (field: string, value: string) => void
 }
 
-export function DataStructureForm({ values = {}, onChange }: DataStructureFormProps) {
+export function DataStructureForm({
+  values = {},
+  onChange,
+}: DataStructureFormProps) {
   const handleChange = (field: string) => (value: string) => {
-    onChange?.(field, value);
-  };
+    onChange?.(field, value)
+  }
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-6">
@@ -75,5 +78,5 @@ export function DataStructureForm({ values = {}, onChange }: DataStructureFormPr
         />
       </div>
     </div>
-  );
+  )
 }

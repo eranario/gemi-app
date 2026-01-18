@@ -41,9 +41,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": [
-      "binaries/gemi-backend"
-    ],
+    "externalBin": ["binaries/gemi-backend"],
     "linux": {
       "deb": {
         "depends": []

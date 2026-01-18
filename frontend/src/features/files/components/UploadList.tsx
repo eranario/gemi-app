@@ -1,6 +1,7 @@
-import { useState } from "react";
 import { File, X } from "lucide-react";
+import { useState } from "react";
 import { UploadZone } from "./UploadZone";
+import { Button } from "@/components/ui/button";
 
 export function UploadList() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
@@ -43,6 +44,9 @@ export function UploadList() {
                 </button>
               </div>
             ))}
+            <Button variant="outline" className="mt-4">
+              Upload {uploadedFiles.length} files(s)
+            </Button>
           </div>
         </div>
       )}

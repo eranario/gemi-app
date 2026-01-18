@@ -1,6 +1,4 @@
-import { DataStructureForm } from "../components";
-import { UploadList } from "../components";
-import { DataTypes } from "../components";
+import { DataStructureForm, DataTypes, UploadList } from "../components"
 
 export function UploadData() {
   return (
@@ -13,5 +11,5 @@ export function UploadData() {
         </div>
       </div>
     </div>
-  );
+  )
 }

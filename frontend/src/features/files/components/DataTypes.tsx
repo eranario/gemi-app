@@ -1,15 +1,15 @@
-import { useState } from "react";
-import { ChevronDown } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { ChevronDown } from "lucide-react"
+import { useState } from "react"
+import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
-  DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-} from "@/components/ui/dropdown-menu";
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 interface DataTypesProps {
-  onChange?: (value: string) => void;
+  onChange?: (value: string) => void
 }
 
 export function DataTypes({ onChange }: DataTypesProps) {
@@ -19,23 +19,27 @@ export function DataTypes({ onChange }: DataTypesProps) {
     "Farm-ng Binary File",
     "Orthomosaic",
     "Weather Data",
-  ];
-  const [selectedFileType, setSelectedFileType] = useState<string | null>(null);
+  ]
+  const [selectedFileType, setSelectedFileType] = useState<string | null>(null)
+  const dropdownWidth: string = "w-50"
 
   const handleSelect = (type: string) => {
-    setSelectedFileType(type);
-    onChange?.(type);
-  };
+    setSelectedFileType(type)
+    onChange?.(type)
+  }
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline">
+        <Button
+          variant="outline"
+          className={`${dropdownWidth} justify-between`}
+        >
           {selectedFileType ?? "Select File Type"}
           <ChevronDown className="ml-2 h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent>
+      <DropdownMenuContent className={dropdownWidth}>
         {fileTypes.map((type) => (
           <DropdownMenuItem key={type} onClick={() => handleSelect(type)}>
             {type}
@@ -43,5 +47,5 @@ export function DataTypes({ onChange }: DataTypesProps) {
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
-  );
+  )
 }
