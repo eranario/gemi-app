@@ -40,10 +40,10 @@ export function UploadZone({ onFilesAdded }: UploadZoneProps) {
   };
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-6">
+    <div className="rounded-lg border border-border bg-card p-6">
       <div className="mb-4 flex items-center gap-2">
-        <Image className="h-5 w-5 text-gray-700" />
-        <h2 className="text-gray-900">Upload</h2>
+        <Image className="h-5 w-5 text-muted-foreground" />
+        <h2 className="text-foreground">Upload</h2>
       </div>
 
       <div
@@ -60,15 +60,15 @@ export function UploadZone({ onFilesAdded }: UploadZoneProps) {
         onDrop={handleDrop}
         className={`cursor-pointer rounded-lg border-2 border-dashed p-8 text-center transition-colors ${
           isDragging
-            ? "border-blue-400 bg-blue-50"
-            : "border-gray-300 hover:border-gray-400 hover:bg-gray-50"
+            ? "border-primary bg-primary/10"
+            : "border-border hover:border-muted-foreground hover:bg-muted"
         }`}
       >
-        <Upload className="mx-auto mb-4 h-12 w-12 text-gray-400" />
-        <p className="mb-1 text-gray-700">
+        <Upload className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
+        <p className="mb-1 text-foreground">
           Drop image files here or click to browse
         </p>
-        <p className="text-gray-500">Supports multiple files</p>
+        <p className="text-muted-foreground">Supports multiple files</p>
       </div>
 
       <input

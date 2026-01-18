@@ -2,7 +2,7 @@ import { DataStructureForm, DataTypes, UploadList } from "../components"
 
 export function UploadData() {
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-background">
       <div className="mx-auto max-w-5xl p-8">
         <div className="space-y-6">
           <DataTypes />

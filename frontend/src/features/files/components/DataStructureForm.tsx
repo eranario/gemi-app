@@ -1,16 +1,16 @@
-import { FolderTree } from "lucide-react"
-import { TextField } from "./TextField"
+import { FolderTree } from "lucide-react";
+import { TextField } from "./TextField";
 
 interface DataStructureFormProps {
   values?: {
-    experiment?: string
-    location?: string
-    population?: string
-    date?: string
-    platform?: string
-    sensor?: string
-  }
-  onChange?: (field: string, value: string) => void
+    experiment?: string;
+    location?: string;
+    population?: string;
+    date?: string;
+    platform?: string;
+    sensor?: string;
+  };
+  onChange?: (field: string, value: string) => void;
 }
 
 export function DataStructureForm({
@@ -18,14 +18,14 @@ export function DataStructureForm({
   onChange,
 }: DataStructureFormProps) {
   const handleChange = (field: string) => (value: string) => {
-    onChange?.(field, value)
-  }
+    onChange?.(field, value);
+  };
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-6">
+    <div className="border-border bg-card rounded-lg border p-6">
       <div className="mb-4 flex items-center gap-2">
-        <FolderTree className="h-5 w-5 text-gray-700" />
-        <h2 className="text-gray-900">Data Structure</h2>
+        <FolderTree className="text-card-foreground h-5 w-5" />
+        <h2 className="text-foreground">Data Structure</h2>
       </div>
 
       <div className="space-y-4">
@@ -78,5 +78,5 @@ export function DataStructureForm({
         />
       </div>
     </div>
-  )
+  );
 }
