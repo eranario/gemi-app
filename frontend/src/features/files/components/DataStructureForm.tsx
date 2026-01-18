@@ -1,7 +1,9 @@
 import { FolderTree } from "lucide-react";
 import { TextField } from "./TextField";
+import { uploadDataTypes } from "./uploadDataTypes";
 
 interface DataStructureFormProps {
+  fileType?: string | null;
   values?: {
     experiment?: string;
     location?: string;
@@ -14,9 +16,23 @@ interface DataStructureFormProps {
 }
 
 export function DataStructureForm({
+  fileType,
   values = {},
   onChange,
 }: DataStructureFormProps) {
+  // if no file type is selected show this message
+  if (!fileType) {
+    return (
+      <div className="border-border bg-card rounded-lg border p-6">
+        <p className="text-muted-foreground">Please select a file type.</p>
+      </div>
+    );
+  }
+
+  // fields for file type
+  const config = uploadDataTypes[fileType as keyof typeof uploadDataTypes];
+  const fields = config?.fields || [];
+
   const handleChange = (field: string) => (value: string) => {
     onChange?.(field, value);
   };
@@ -29,53 +45,16 @@ export function DataStructureForm({
       </div>
 
       <div className="space-y-4">
-        <TextField
-          id="experiment"
-          label="Experiment"
-          placeholder="e.g., Experiment1"
-          value={values.experiment}
-          onChange={handleChange("experiment")}
-        />
-
-        <TextField
-          id="location"
-          label="Location"
-          placeholder="e.g., Davis"
-          value={values.location}
-          onChange={handleChange("location")}
-        />
-
-        <TextField
-          id="population"
-          label="Population"
-          placeholder="e.g., Cowpea"
-          value={values.population}
-          onChange={handleChange("population")}
-        />
-
-        <TextField
-          id="date"
-          label="Date"
-          type="date"
-          value={values.date}
-          onChange={handleChange("date")}
-        />
-
-        <TextField
-          id="platform"
-          label="Platform"
-          placeholder="e.g., DJI Mavic 4"
-          value={values.platform}
-          onChange={handleChange("platform")}
-        />
-
-        <TextField
-          id="sensor"
-          label="Sensor"
-          placeholder="e.g., Hasselblad"
-          value={values.sensor}
-          onChange={handleChange("sensor")}
-        />
+        {fields.map((field) => (
+          <TextField
+            key={field}
+            id={field}
+            label={field.charAt(0).toUpperCase() + field.slice(1)}
+            placeholder={`e.g., ${field}`}
+            value={values[field as keyof typeof values]}
+            onChange={handleChange(field)}
+          />
+        ))}
       </div>
     </div>
   );
