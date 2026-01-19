@@ -50,7 +50,8 @@ export function DataStructureForm({
             key={field}
             id={field}
             label={field.charAt(0).toUpperCase() + field.slice(1)}
-            placeholder={`e.g., ${field}`}
+            type={field === "date" ? "date" : "text"}
+            placeholder={`${field}`}
             value={values[field as keyof typeof values]}
             onChange={handleChange(field)}
           />
