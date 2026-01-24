@@ -1,7 +1,7 @@
 import uuid
 
 from sqlmodel import Session, select
-from app.models import FileUploadCreate, FileUpload
+from app.models import FileUploadCreate, FileUpload, FileUploadUpdate
 
 
 def create_file_upload(
@@ -50,7 +50,7 @@ def update_file_upload(
     return db_file
 
 
-def delete_file_upload(*, session: Session, id: uuid) -> None:
+def delete_file_upload(*, session: Session, id: uuid.UUID) -> None:
     file_upload = session.get(FileUpload, id)
     if not file_upload:
         raise ValueError("FileUpload not found")

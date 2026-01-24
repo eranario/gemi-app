@@ -47,7 +47,7 @@ class FileUpload(FileUploadBase, table=True):
     owner_id: uuid.UUID = Field(
         foreign_key="user.id", nullable=False, ondelete="CASCADE"
     )
-    owner: "User | None" = Relationship(back_populates="file_uploads")
+    owner: "User" = Relationship(back_populates="file_uploads")
 
     # Additional useful fields
     original_filename: str | None = Field(default=None, max_length=500)
