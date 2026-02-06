@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     # SQLite database path (if None, uses platform-specific app data directory)
     SQLITE_DB_PATH: str | None = None
 
+    # app data root (storage)
+    APP_DATA_ROOT: str = str(Path.home() / "GEMI-Data")
+
     def _get_default_sqlite_path(self) -> str:
         """Get platform-specific default SQLite path."""
         if sys.platform == "darwin":

@@ -33,6 +33,13 @@ from app.models.file_upload import (
     FileUploadUpdate,
 )
 
+from app.models.app_settings import (
+    AppSetting,
+    AppSettingBase,
+    AppSettingPublic,
+    AppSettingUpdate,
+)
+
 from app.models.common import (
     Message,
     NewPassword,

@@ -45,17 +45,25 @@ export function DataStructureForm({
       </div>
 
       <div className="space-y-4">
-        {fields.map((field) => (
-          <TextField
-            key={field}
-            id={field}
-            label={field.charAt(0).toUpperCase() + field.slice(1)}
-            type={field === "date" ? "date" : "text"}
-            placeholder={`${field}`}
-            value={values[field as keyof typeof values]}
-            onChange={handleChange(field)}
-          />
-        ))}
+        {fields.map((field, index) => {
+          const previousField = fields[index - 1];
+          const isDisabled = previousField
+            ? !values[previousField as keyof typeof values]
+            : false;
+
+          return (
+            <TextField
+              key={field}
+              id={field}
+              label={field.charAt(0).toUpperCase() + field.slice(1)}
+              type={field === "date" ? "date" : "text"}
+              placeholder={`${field}`}
+              value={values[field as keyof typeof values]}
+              onChange={handleChange(field)}
+              disabled={isDisabled}
+            />
+          );
+        })}
       </div>
     </div>
   );
