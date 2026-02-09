@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 async function fetchDataRoot(): Promise<string> {
   const token =
     typeof OpenAPI.TOKEN === "function"
-      ? await OpenAPI.TOKEN()
+      ? await (OpenAPI.TOKEN as () => Promise<string>)()
       : OpenAPI.TOKEN ?? ""
   const res = await fetch(`${OpenAPI.BASE}/api/v1/settings/data-root`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -21,7 +21,7 @@ async function fetchDataRoot(): Promise<string> {
 async function saveDataRoot(value: string): Promise<string> {
   const token =
     typeof OpenAPI.TOKEN === "function"
-      ? await OpenAPI.TOKEN()
+      ? await (OpenAPI.TOKEN as () => Promise<string>)()
       : OpenAPI.TOKEN ?? ""
   const res = await fetch(`${OpenAPI.BASE}/api/v1/settings/data-root`, {
     method: "PUT",

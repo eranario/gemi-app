@@ -11,9 +11,10 @@
     "lint": "biome check --write --unsafe --no-errors-on-unmatched --files-ignore-unknown=true ./",
     "preview": "vite preview",
     "generate-client": "openapi-ts",
+    "build:backend": "../backend/build-desktop.sh",
     "tauri": "tauri",
     "tauri:dev": "concurrently -k -n backend,tauri -c blue,magenta \"npm run dev:backend\" \"GDK_BACKEND=x11 tauri dev\"",
-    "tauri:build": "tauri build"
+    "tauri:build": "npm run build:backend && tauri build"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

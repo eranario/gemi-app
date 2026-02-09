@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Entry point for the bundled GEMI backend server."""
 
+import os
+
+# Set desktop environment BEFORE importing the app so config.py picks it up
+os.environ["ENVIRONMENT"] = "desktop"
+
 import uvicorn
 
 # Import app directly so PyInstaller can bundle it

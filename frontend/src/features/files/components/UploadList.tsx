@@ -20,7 +20,7 @@ export function UploadList() {
       <UploadZone onFilesAdded={addFiles} />
 
       {uploadedFiles.length > 0 && (
-        <div className="rounded-lg border border-border bg-card p-6">
+        <div className="border-border bg-card rounded-lg border p-6">
           <button
             onClick={() => setIsExpanded(!isExpanded)}
             className="flex w-full items-center justify-between text-left"
@@ -29,9 +29,9 @@ export function UploadList() {
               Selected Files ({uploadedFiles.length})
             </h3>
             {isExpanded ? (
-              <ChevronUp className="h-5 w-5 text-muted-foreground" />
+              <ChevronUp className="text-muted-foreground h-5 w-5" />
             ) : (
-              <ChevronDown className="h-5 w-5 text-muted-foreground" />
+              <ChevronDown className="text-muted-foreground h-5 w-5" />
             )}
           </button>
 
@@ -40,12 +40,14 @@ export function UploadList() {
               {uploadedFiles.map((file, index) => (
                 <div
                   key={index}
-                  className="flex items-center justify-between rounded border border-border bg-muted p-2"
+                  className="border-border bg-muted flex items-center justify-between rounded border p-2"
                 >
                   <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <File className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-                    <span className="truncate text-foreground">{file.name}</span>
-                    <span className="flex-shrink-0 text-sm text-muted-foreground">
+                    <File className="text-muted-foreground h-4 w-4 flex-shrink-0" />
+                    <span className="text-foreground truncate">
+                      {file.name}
+                    </span>
+                    <span className="text-muted-foreground flex-shrink-0 text-sm">
                       ({(file.size / 1024 / 1024).toFixed(2)} MB)
                     </span>
                   </div>
@@ -54,9 +56,9 @@ export function UploadList() {
                       e.stopPropagation();
                       removeFile(index);
                     }}
-                    className="ml-2 flex-shrink-0 rounded p-1 hover:bg-accent"
+                    className="hover:bg-accent ml-2 flex-shrink-0 rounded p-1"
                   >
-                    <X className="h-4 w-4 text-muted-foreground" />
+                    <X className="text-muted-foreground h-4 w-4" />
                   </button>
                 </div>
               ))}

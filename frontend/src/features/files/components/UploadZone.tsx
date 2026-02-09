@@ -1,6 +1,5 @@
 import { useState, useRef, DragEvent, ChangeEvent } from "react";
 import { Upload, Image } from "lucide-react";
-import { Button } from "@/components/ui/button";
 
 interface UploadZoneProps {
   onFilesAdded?: (files: FileList | File[]) => void;

@@ -18,16 +18,28 @@ hiddenimports = [
     'uvicorn.lifespan.on',
     # App modules
     'app.api.main',
+    'app.api.deps',
     'app.api.routes.login',
     'app.api.routes.users',
     'app.api.routes.items',
     'app.api.routes.utils',
     'app.api.routes.private',
+    'app.api.routes.files',
+    'app.api.routes.app_settings',
     'app.core.config',
     'app.core.db',
     'app.core.security',
     'app.models',
+    'app.models.user',
+    'app.models.item',
+    'app.models.file_upload',
+    'app.models.app_settings',
+    'app.models.common',
     'app.crud',
+    'app.crud.user',
+    'app.crud.item',
+    'app.crud.file_upload',
+    'app.crud.app_settings',
     # Dependencies
     'email_validator',
     'passlib.handlers.bcrypt',
@@ -37,6 +49,9 @@ hiddenimports = [
     'pydantic_settings',
     'aiosqlite',
     'sqlite3',
+    'jwt',
+    'jwt.exceptions',
+    'sentry_sdk',
 ]
 
 # Collect all submodules for complex packages
@@ -46,6 +61,7 @@ hiddenimports += collect_submodules('sqlmodel')
 hiddenimports += collect_submodules('fastapi')
 hiddenimports += collect_submodules('starlette')
 hiddenimports += collect_submodules('uvicorn')
+hiddenimports += collect_submodules('sentry_sdk')
 
 a = Analysis(
     ['run_server.py'],
