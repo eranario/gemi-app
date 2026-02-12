@@ -2,6 +2,7 @@ import { File, X, ChevronDown, ChevronUp } from "lucide-react";
 import { useState } from "react";
 import { UploadZone } from "./UploadZone";
 import { Button } from "@/components/ui/button";
+import { FilesService } from "@/client";
 
 export function UploadList() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
@@ -13,6 +14,16 @@ export function UploadList() {
 
   const removeFile = (index: number) => {
     setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleUploadClick = async () => {
+    console.log(uploadedFiles);
+
+    await FilesService.uploadFiles({
+      dataType: "image", // pull data type
+      targetRootDir: "uploads", // pull from predefined config
+      formData: { files: uploadedFiles },
+    });
   };
 
   return (
@@ -65,7 +76,11 @@ export function UploadList() {
             </div>
           )}
 
-          <Button variant="outline" className="mt-4">
+          <Button
+            variant="outline"
+            className="mt-4"
+            onClick={handleUploadClick}
+          >
             Upload {uploadedFiles.length} file(s)
           </Button>
         </div>

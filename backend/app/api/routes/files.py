@@ -1,7 +1,8 @@
 import uuid
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile
 
 from app.api.deps import CurrentUser, SessionDep
 from app.core.config import settings
@@ -95,9 +96,29 @@ def delete_file(
 # upload files to dir /files/upload
 @router.post("/upload")
 def upload_files(
-    session: SessionDep, data_type: str, target_root_dir: str, reupload: bool = False
+    session: SessionDep,
+    files: list[UploadFile],
+    data_type: str,
+    target_root_dir: str,
+    reupload: bool = False,
 ):
     # NOTE: make sure the target_root_dir is "sanitized" at the frontend
-
     data_root = get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT
-    print("testing upload files endpoint")
+    print(f"Using data root: {data_root}")
+
+    dest_dir = Path(data_root) / target_root_dir
+    print(f"Destination directory: {dest_dir}")
+    # dest_dir.mkdir(parents=True, exist_ok=True)
+
+    # saved = []
+    # for f in files:
+    #     dest_path = dest_dir / f.filename
+    #     if dest_path.exists() and not reupload:
+    #         continue
+    #     with open(dest_path, "wb") as out:
+    #         out.write(f.file.read())
+    #     saved.append(str(dest_path))
+
+    print("file upload endpoint reached")
+    saved = [None]
+    return {"uploaded": saved, "count": len(saved)}

@@ -3,7 +3,140 @@
 import type { CancelablePromise } from './core/CancelablePromise';
 import { OpenAPI } from './core/OpenAPI';
 import { request as __request } from './core/request';
-import type { ItemsReadItemsData, ItemsReadItemsResponse, ItemsCreateItemData, ItemsCreateItemResponse, ItemsReadItemData, ItemsReadItemResponse, ItemsUpdateItemData, ItemsUpdateItemResponse, ItemsDeleteItemData, ItemsDeleteItemResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, PrivateCreateUserData, PrivateCreateUserResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse } from './types.gen';
+import type { FilesCreateFileData, FilesCreateFileResponse, FilesReadFilesData, FilesReadFilesResponse, FilesReadFileData, FilesReadFileResponse, FilesUpdateFileData, FilesUpdateFileResponse, FilesDeleteFileData, FilesDeleteFileResponse, FilesUploadFilesData, FilesUploadFilesResponse, ItemsReadItemsData, ItemsReadItemsResponse, ItemsCreateItemData, ItemsCreateItemResponse, ItemsReadItemData, ItemsReadItemResponse, ItemsUpdateItemData, ItemsUpdateItemResponse, ItemsDeleteItemData, ItemsDeleteItemResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, PrivateCreateUserData, PrivateCreateUserResponse, SettingsReadDataRootResponse, SettingsUpdateDataRootData, SettingsUpdateDataRootResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse } from './types.gen';
+
+export class FilesService {
+    /**
+     * Create File
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns FileUploadPublic Successful Response
+     * @throws ApiError
+     */
+    public static createFile(data: FilesCreateFileData): CancelablePromise<FilesCreateFileResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/files/',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Read Files
+     * @param data The data for the request.
+     * @param data.skip
+     * @param data.limit
+     * @returns FileUploadsPublic Successful Response
+     * @throws ApiError
+     */
+    public static readFiles(data: FilesReadFilesData = {}): CancelablePromise<FilesReadFilesResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/files/',
+            query: {
+                skip: data.skip,
+                limit: data.limit
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Read File
+     * @param data The data for the request.
+     * @param data.id
+     * @returns FileUploadPublic Successful Response
+     * @throws ApiError
+     */
+    public static readFile(data: FilesReadFileData): CancelablePromise<FilesReadFileResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/files/{id}',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Update File
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.requestBody
+     * @returns FileUploadPublic Successful Response
+     * @throws ApiError
+     */
+    public static updateFile(data: FilesUpdateFileData): CancelablePromise<FilesUpdateFileResponse> {
+        return __request(OpenAPI, {
+            method: 'PUT',
+            url: '/api/v1/files/{id}',
+            path: {
+                id: data.id
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Delete File
+     * @param data The data for the request.
+     * @param data.id
+     * @returns Message Successful Response
+     * @throws ApiError
+     */
+    public static deleteFile(data: FilesDeleteFileData): CancelablePromise<FilesDeleteFileResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/files/{id}',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Upload Files
+     * @param data The data for the request.
+     * @param data.dataType
+     * @param data.targetRootDir
+     * @param data.formData
+     * @param data.reupload
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static uploadFiles(data: FilesUploadFilesData): CancelablePromise<FilesUploadFilesResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/files/upload',
+            query: {
+                data_type: data.dataType,
+                target_root_dir: data.targetRootDir,
+                reupload: data.reupload
+            },
+            formData: data.formData,
+            mediaType: 'multipart/form-data',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+}
 
 export class ItemsService {
     /**
@@ -226,6 +359,39 @@ export class PrivateService {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/private/users/',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+}
+
+export class SettingsService {
+    /**
+     * Read Data Root
+     * @returns AppSettingPublic Successful Response
+     * @throws ApiError
+     */
+    public static readDataRoot(): CancelablePromise<SettingsReadDataRootResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/settings/data-root'
+        });
+    }
+    
+    /**
+     * Update Data Root
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns AppSettingPublic Successful Response
+     * @throws ApiError
+     */
+    public static updateDataRoot(data: SettingsUpdateDataRootData): CancelablePromise<SettingsUpdateDataRootResponse> {
+        return __request(OpenAPI, {
+            method: 'PUT',
+            url: '/api/v1/settings/data-root',
             body: data.requestBody,
             mediaType: 'application/json',
             errors: {
