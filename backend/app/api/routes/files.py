@@ -22,7 +22,6 @@ from app.models import (
     Message,
 )
 
-
 router = APIRouter(prefix="/files", tags=["files"])
 
 
@@ -102,12 +101,11 @@ def upload_files(
     target_root_dir: str,
     reupload: bool = False,
 ):
-    # NOTE: make sure the target_root_dir is "sanitized" at the frontend
     data_root = get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT
-    print(f"Using data root: {data_root}")
+    print(f"UPLOAD_FILES: Using data root: {data_root}")
 
     dest_dir = Path(data_root) / target_root_dir
-    print(f"Destination directory: {dest_dir}")
+    print(f"UPLOAD_FILES: Destination directory: {dest_dir}")
     # dest_dir.mkdir(parents=True, exist_ok=True)
 
     # saved = []

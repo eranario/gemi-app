@@ -19,7 +19,7 @@ export function UploadData() {
             values={formValues}
             onChange={handleFormChange}
           />
-          <UploadList />
+          <UploadList dataType={selectedFileType} formValues={formValues} />
         </div>
       </div>
     </div>

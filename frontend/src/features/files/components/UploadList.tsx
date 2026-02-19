@@ -3,8 +3,15 @@ import { useState } from "react";
 import { UploadZone } from "./UploadZone";
 import { Button } from "@/components/ui/button";
 import { FilesService } from "@/client";
+import { dataLocations } from "@/config/dataLocations";
+import { toast } from "sonner";
 
-export function UploadList() {
+interface UploadListProps {
+  dataType: string | null;
+  formValues: Record<string, string>;
+}
+
+export function UploadList({ dataType, formValues }: UploadListProps) {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -17,10 +24,42 @@ export function UploadList() {
   };
 
   const handleUploadClick = async () => {
-    console.log(uploadedFiles);
+    console.log("Selected dataType: ", dataType);
+
+    if (!dataType) return;
+
+    // check if dataType is available in dataLocations
+    const selectedDataType =
+      dataLocations["File Upload"][dataType as keyof typeof dataLocations];
+    console.log(selectedDataType);
+
+    if (!selectedDataType) {
+      console.error(
+        "Cannot access data type config or selecting data type error."
+      );
+      toast.error(
+        "Cannot access data type config or selecting data type error."
+      );
+      return;
+    }
+
+    // add Year to formValues given date
+    if (formValues["date"]) {
+      formValues["year"] = formValues["date"].split("-")[0];
+    }
+
+    // setup directory structure
+    const dirList = selectedDataType.directory;
+    console.log("Defined directory list: ", dirList);
+    console.log("Defined input values: ", formValues);
+
+    const targetRootDir = dirList
+      .map((field) => formValues[field.toLowerCase()] || field)
+      .join("/");
+    console.log("Joined directory: ", targetRootDir);
 
     await FilesService.uploadFiles({
-      dataType: "image", // pull data type
+      dataType: dataType, // pull data type
       targetRootDir: "uploads", // pull from predefined config
       formData: { files: uploadedFiles },
     });
