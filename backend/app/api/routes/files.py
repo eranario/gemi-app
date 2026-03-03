@@ -1,8 +1,11 @@
+import logging
+import shutil
 import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from app.api.deps import CurrentUser, SessionDep
 from app.core.config import settings
@@ -23,6 +26,7 @@ from app.models import (
 )
 
 router = APIRouter(prefix="/files", tags=["files"])
+logger = logging.getLogger(__name__)
 
 
 # POST /files/ (create new upload record)
@@ -92,30 +96,37 @@ def delete_file(
     return Message(message="File deleted successfully")
 
 
-# upload files to dir /files/upload
-@router.post("/upload")
-def upload_files(
+class LocalCopyRequest(BaseModel):
+    file_paths: list[str]
+    data_type: str
+    target_root_dir: str
+    reupload: bool = False
+
+
+# copy local files directly on disk (faster for desktop/Tauri)
+@router.post("/copy-local")
+def copy_local_files(
     session: SessionDep,
-    files: list[UploadFile],
-    data_type: str,
-    target_root_dir: str,
-    reupload: bool = False,
+    body: LocalCopyRequest,
 ):
     data_root = get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT
-    print(f"UPLOAD_FILES: Using data root: {data_root}")
+    dest_dir = Path(data_root) / body.target_root_dir
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Destination directory for current upload: {dest_dir}")
 
-    dest_dir = Path(data_root) / target_root_dir
-    print(f"UPLOAD_FILES: Destination directory: {dest_dir}")
-    # dest_dir.mkdir(parents=True, exist_ok=True)
+    saved = []
+    skipped = []
+    for file_path in body.file_paths:
+        src = Path(file_path)
+        if not src.exists():
+            raise HTTPException(
+                status_code=400, detail=f"Source file not found: {file_path}"
+            )
+        dest_path = dest_dir / src.name
+        if dest_path.exists() and not body.reupload:
+            skipped.append(src.name)
+            continue
+        shutil.copy2(src, dest_path)
+        saved.append(str(dest_path))
 
-    # saved = []
-    # for f in files:
-    #     dest_path = dest_dir / f.filename
-    #     if dest_path.exists() and not reupload:
-    #         continue
-    #     with open(dest_path, "wb") as out:
-    #         out.write(f.file.read())
-    #     saved.append(str(dest_path))
-
-    saved = [None]
-    return {"uploaded": saved, "count": len(saved)}
+    return {"uploaded": saved, "skipped": skipped, "count": len(saved)}

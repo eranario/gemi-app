@@ -31,22 +31,6 @@ export const AppSettingUpdateSchema = {
     title: 'AppSettingUpdate'
 } as const;
 
-export const Body_files_upload_filesSchema = {
-    properties: {
-        files: {
-            items: {
-                type: 'string',
-                format: 'binary'
-            },
-            type: 'array',
-            title: 'Files'
-        }
-    },
-    type: 'object',
-    required: ['files'],
-    title: 'Body_files-upload_files'
-} as const;
-
 export const Body_login_login_access_tokenSchema = {
     properties: {
         grant_type: {
@@ -552,6 +536,34 @@ export const ItemsPublicSchema = {
     type: 'object',
     required: ['data', 'count'],
     title: 'ItemsPublic'
+} as const;
+
+export const LocalCopyRequestSchema = {
+    properties: {
+        file_paths: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'File Paths'
+        },
+        data_type: {
+            type: 'string',
+            title: 'Data Type'
+        },
+        target_root_dir: {
+            type: 'string',
+            title: 'Target Root Dir'
+        },
+        reupload: {
+            type: 'boolean',
+            title: 'Reupload',
+            default: false
+        }
+    },
+    type: 'object',
+    required: ['file_paths', 'data_type', 'target_root_dir'],
+    title: 'LocalCopyRequest'
 } as const;
 
 export const MessageSchema = {

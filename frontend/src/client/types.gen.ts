@@ -9,10 +9,6 @@ export type AppSettingUpdate = {
     value: string;
 };
 
-export type Body_files_upload_files = {
-    files: Array<((Blob | File))>;
-};
-
 export type Body_login_login_access_token = {
     grant_type?: (string | null);
     username: string;
@@ -94,6 +90,13 @@ export type ItemsPublic = {
 export type ItemUpdate = {
     title?: (string | null);
     description?: (string | null);
+};
+
+export type LocalCopyRequest = {
+    file_paths: Array<(string)>;
+    data_type: string;
+    target_root_dir: string;
+    reupload?: boolean;
 };
 
 export type Message = {
@@ -200,14 +203,11 @@ export type FilesDeleteFileData = {
 
 export type FilesDeleteFileResponse = (Message);
 
-export type FilesUploadFilesData = {
-    dataType: string;
-    formData: Body_files_upload_files;
-    reupload?: boolean;
-    targetRootDir: string;
+export type FilesCopyLocalFilesData = {
+    requestBody: LocalCopyRequest;
 };
 
-export type FilesUploadFilesResponse = (unknown);
+export type FilesCopyLocalFilesResponse = (unknown);
 
 export type ItemsReadItemsData = {
     limit?: number;

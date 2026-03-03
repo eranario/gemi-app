@@ -3,7 +3,7 @@
 import type { CancelablePromise } from './core/CancelablePromise';
 import { OpenAPI } from './core/OpenAPI';
 import { request as __request } from './core/request';
-import type { FilesCreateFileData, FilesCreateFileResponse, FilesReadFilesData, FilesReadFilesResponse, FilesReadFileData, FilesReadFileResponse, FilesUpdateFileData, FilesUpdateFileResponse, FilesDeleteFileData, FilesDeleteFileResponse, FilesUploadFilesData, FilesUploadFilesResponse, ItemsReadItemsData, ItemsReadItemsResponse, ItemsCreateItemData, ItemsCreateItemResponse, ItemsReadItemData, ItemsReadItemResponse, ItemsUpdateItemData, ItemsUpdateItemResponse, ItemsDeleteItemData, ItemsDeleteItemResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, PrivateCreateUserData, PrivateCreateUserResponse, SettingsReadDataRootResponse, SettingsUpdateDataRootData, SettingsUpdateDataRootResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse } from './types.gen';
+import type { FilesCreateFileData, FilesCreateFileResponse, FilesReadFilesData, FilesReadFilesResponse, FilesReadFileData, FilesReadFileResponse, FilesUpdateFileData, FilesUpdateFileResponse, FilesDeleteFileData, FilesDeleteFileResponse, FilesCopyLocalFilesData, FilesCopyLocalFilesResponse, ItemsReadItemsData, ItemsReadItemsResponse, ItemsCreateItemData, ItemsCreateItemResponse, ItemsReadItemData, ItemsReadItemResponse, ItemsUpdateItemData, ItemsUpdateItemResponse, ItemsDeleteItemData, ItemsDeleteItemResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, PrivateCreateUserData, PrivateCreateUserResponse, SettingsReadDataRootResponse, SettingsUpdateDataRootData, SettingsUpdateDataRootResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse } from './types.gen';
 
 export class FilesService {
     /**
@@ -111,26 +111,18 @@ export class FilesService {
     }
     
     /**
-     * Upload Files
+     * Copy Local Files
      * @param data The data for the request.
-     * @param data.dataType
-     * @param data.targetRootDir
-     * @param data.formData
-     * @param data.reupload
+     * @param data.requestBody
      * @returns unknown Successful Response
      * @throws ApiError
      */
-    public static uploadFiles(data: FilesUploadFilesData): CancelablePromise<FilesUploadFilesResponse> {
+    public static copyLocalFiles(data: FilesCopyLocalFilesData): CancelablePromise<FilesCopyLocalFilesResponse> {
         return __request(OpenAPI, {
             method: 'POST',
-            url: '/api/v1/files/upload',
-            query: {
-                data_type: data.dataType,
-                target_root_dir: data.targetRootDir,
-                reupload: data.reupload
-            },
-            formData: data.formData,
-            mediaType: 'multipart/form-data',
+            url: '/api/v1/files/copy-local',
+            body: data.requestBody,
+            mediaType: 'application/json',
             errors: {
                 422: 'Validation Error'
             }

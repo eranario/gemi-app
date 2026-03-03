@@ -11,16 +11,20 @@ interface UploadListProps {
   formValues: Record<string, string>;
 }
 
+function fileNameFromPath(path: string): string {
+  return path.split(/[\\/]/).pop() || path;
+}
+
 export function UploadList({ dataType, formValues }: UploadListProps) {
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
 
-  const addFiles = (files: FileList | File[]) => {
-    setUploadedFiles((prev) => [...prev, ...Array.from(files)]);
+  const addFiles = (paths: string[]) => {
+    setSelectedPaths((prev) => [...prev, ...paths]);
   };
 
   const removeFile = (index: number) => {
-    setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
+    setSelectedPaths((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleUploadClick = async () => {
@@ -28,7 +32,6 @@ export function UploadList({ dataType, formValues }: UploadListProps) {
 
     if (!dataType) return;
 
-    // check if dataType is available in dataTypes
     const selectedDataType =
       dataTypes[dataType as keyof typeof dataTypes];
     console.log(selectedDataType);
@@ -46,12 +49,10 @@ export function UploadList({ dataType, formValues }: UploadListProps) {
     try {
       const values = { ...formValues };
 
-      // add Year to values given date
       if (values["date"]) {
         values["year"] = values["date"].split("-")[0];
       }
 
-      // setup directory structure
       const dirList = selectedDataType.directory;
       console.log("Defined directory list: ", dirList);
       console.log("Defined input values: ", values);
@@ -61,12 +62,16 @@ export function UploadList({ dataType, formValues }: UploadListProps) {
         .join("/");
       console.log("Joined directory: ", targetRootDir);
 
-      await FilesService.uploadFiles({
-        dataType: dataType, // pull data type
-        targetRootDir: targetRootDir, // pull from predefined config
-        formData: { files: uploadedFiles },
+      await FilesService.copyLocalFiles({
+        requestBody: {
+          file_paths: selectedPaths,
+          data_type: dataType,
+          target_root_dir: targetRootDir,
+        },
       });
 
+      toast.success(`Copied ${selectedPaths.length} file(s) successfully`);
+      setSelectedPaths([]);
     } catch (error) {
       console.error("Upload failed:", error);
       toast.error(`Upload failed: ${error instanceof Error ? error.message : error}`)
@@ -78,14 +83,14 @@ export function UploadList({ dataType, formValues }: UploadListProps) {
     <div className="space-y-6">
       <UploadZone onFilesAdded={addFiles} />
 
-      {uploadedFiles.length > 0 && (
+      {selectedPaths.length > 0 && (
         <div className="border-border bg-card rounded-lg border p-6">
           <button
             onClick={() => setIsExpanded(!isExpanded)}
             className="flex w-full items-center justify-between text-left"
           >
             <h3 className="text-foreground">
-              Selected Files ({uploadedFiles.length})
+              Selected Files ({selectedPaths.length})
             </h3>
             {isExpanded ? (
               <ChevronUp className="text-muted-foreground h-5 w-5" />
@@ -96,7 +101,7 @@ export function UploadList({ dataType, formValues }: UploadListProps) {
 
           {isExpanded && (
             <div className="mt-4 max-h-64 space-y-2 overflow-y-auto">
-              {uploadedFiles.map((file, index) => (
+              {selectedPaths.map((filePath, index) => (
                 <div
                   key={index}
                   className="border-border bg-muted flex items-center justify-between rounded border p-2"
@@ -104,10 +109,7 @@ export function UploadList({ dataType, formValues }: UploadListProps) {
                   <div className="flex min-w-0 flex-1 items-center gap-2">
                     <File className="text-muted-foreground h-4 w-4 flex-shrink-0" />
                     <span className="text-foreground truncate">
-                      {file.name}
-                    </span>
-                    <span className="text-muted-foreground flex-shrink-0 text-sm">
-                      ({(file.size / 1024 / 1024).toFixed(2)} MB)
+                      {fileNameFromPath(filePath)}
                     </span>
                   </div>
                   <button
@@ -129,7 +131,7 @@ export function UploadList({ dataType, formValues }: UploadListProps) {
             className="mt-4"
             onClick={handleUploadClick}
           >
-            Upload {uploadedFiles.length} file(s)
+            Upload {selectedPaths.length} file(s)
           </Button>
         </div>
       )}
