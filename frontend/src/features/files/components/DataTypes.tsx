@@ -7,19 +7,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { dataTypes } from "@/config/dataTypes"
 
 interface DataTypesProps {
   onChange?: (value: string) => void
 }
 
 export function DataTypes({ onChange }: DataTypesProps) {
-  const fileTypes = [
-    "Image Data",
-    "Platform Logs",
-    "Farm-ng Binary File",
-    "Orthomosaic",
-    "Weather Data",
-  ]
+  const fileTypes = Object.keys(dataTypes)
   const [selectedFileType, setSelectedFileType] = useState<string | null>(null)
   const dropdownWidth: string = "w-50"
 

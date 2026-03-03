@@ -3,7 +3,7 @@ import { useState } from "react";
 import { UploadZone } from "./UploadZone";
 import { Button } from "@/components/ui/button";
 import { FilesService } from "@/client";
-import { dataLocations } from "@/config/dataLocations";
+import { dataTypes } from "@/config/dataTypes";
 import { toast } from "sonner";
 
 interface UploadListProps {
@@ -28,9 +28,9 @@ export function UploadList({ dataType, formValues }: UploadListProps) {
 
     if (!dataType) return;
 
-    // check if dataType is available in dataLocations
+    // check if dataType is available in dataTypes
     const selectedDataType =
-      dataLocations["File Upload"][dataType as keyof typeof dataLocations];
+      dataTypes[dataType as keyof typeof dataTypes];
     console.log(selectedDataType);
 
     if (!selectedDataType) {
@@ -43,26 +43,35 @@ export function UploadList({ dataType, formValues }: UploadListProps) {
       return;
     }
 
-    // add Year to formValues given date
-    if (formValues["date"]) {
-      formValues["year"] = formValues["date"].split("-")[0];
+    try {
+      const values = { ...formValues };
+
+      // add Year to values given date
+      if (values["date"]) {
+        values["year"] = values["date"].split("-")[0];
+      }
+
+      // setup directory structure
+      const dirList = selectedDataType.directory;
+      console.log("Defined directory list: ", dirList);
+      console.log("Defined input values: ", values);
+
+      const targetRootDir = dirList
+        .map((field) => values[field.toLowerCase()] || field)
+        .join("/");
+      console.log("Joined directory: ", targetRootDir);
+
+      await FilesService.uploadFiles({
+        dataType: dataType, // pull data type
+        targetRootDir: targetRootDir, // pull from predefined config
+        formData: { files: uploadedFiles },
+      });
+
+    } catch (error) {
+      console.error("Upload failed:", error);
+      toast.error(`Upload failed: ${error instanceof Error ? error.message : error}`)
     }
 
-    // setup directory structure
-    const dirList = selectedDataType.directory;
-    console.log("Defined directory list: ", dirList);
-    console.log("Defined input values: ", formValues);
-
-    const targetRootDir = dirList
-      .map((field) => formValues[field.toLowerCase()] || field)
-      .join("/");
-    console.log("Joined directory: ", targetRootDir);
-
-    await FilesService.uploadFiles({
-      dataType: dataType, // pull data type
-      targetRootDir: "uploads", // pull from predefined config
-      formData: { files: uploadedFiles },
-    });
   };
 
   return (

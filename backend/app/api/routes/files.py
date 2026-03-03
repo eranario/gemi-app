@@ -117,6 +117,5 @@ def upload_files(
     #         out.write(f.file.read())
     #     saved.append(str(dest_path))
 
-    print("file upload endpoint reached")
     saved = [None]
     return {"uploaded": saved, "count": len(saved)}

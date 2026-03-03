@@ -1,6 +1,6 @@
 import { FolderTree } from "lucide-react";
 import { TextField } from "./TextField";
-import { uploadDataTypes } from "./uploadDataTypes";
+import { dataTypes } from "@/config/dataTypes";
 
 interface DataStructureFormProps {
   fileType?: string | null;
@@ -30,7 +30,7 @@ export function DataStructureForm({
   }
 
   // fields for file type
-  const config = uploadDataTypes[fileType as keyof typeof uploadDataTypes];
+  const config = dataTypes[fileType as keyof typeof dataTypes];
   const fields = config?.fields || [];
 
   const handleChange = (field: string) => (value: string) => {
