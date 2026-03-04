@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import { FilesService } from "@/client";
 import { DataStructureForm, DataTypes, UploadList } from "../components";
 
 export function UploadData() {
@@ -8,6 +9,31 @@ export function UploadData() {
   const handleFormChange = (field: string, value: string) => {
     setFormValues((prev) => ({ ...prev, [field]: value }));
   };
+
+  const handleFilesSelected = useCallback(
+    async (paths: string[]) => {
+      // Only try the first file, and only fill in empty fields
+      const firstPath = paths[0];
+      if (!firstPath) return;
+
+      try {
+        const meta = await FilesService.extractMetadata({
+          filePath: firstPath,
+        });
+
+        setFormValues((prev) => {
+          const next = { ...prev };
+          if (meta.date && !next.date) next.date = meta.date;
+          if (meta.platform && !next.platform) next.platform = meta.platform;
+          if (meta.sensor && !next.sensor) next.sensor = meta.sensor;
+          return next;
+        });
+      } catch {
+        // No EXIF available — that's fine, user fills in manually
+      }
+    },
+    [],
+  );
 
   return (
     <div className="bg-background min-h-screen">
@@ -19,7 +45,11 @@ export function UploadData() {
             values={formValues}
             onChange={handleFormChange}
           />
-          <UploadList dataType={selectedFileType} formValues={formValues} />
+          <UploadList
+            dataType={selectedFileType}
+            formValues={formValues}
+            onFilesSelected={handleFilesSelected}
+          />
         </div>
       </div>
     </div>

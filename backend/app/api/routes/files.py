@@ -116,6 +116,45 @@ def sync_files(session: SessionDep, current_user: CurrentUser) -> Any:
     return result
 
 
+# POST /files/extract-metadata (read EXIF from a local file)
+@router.post("/extract-metadata")
+def extract_metadata(body: dict[str, str]) -> Any:
+    file_path = body.get("file_path", "")
+    src = Path(file_path)
+    if not src.exists() or not src.is_file():
+        raise HTTPException(status_code=400, detail=f"File not found: {file_path}")
+
+    result: dict[str, str | None] = {"date": None, "platform": None, "sensor": None}
+
+    try:
+        from PIL import Image
+        from PIL.ExifTags import Base as ExifBase
+
+        with Image.open(src) as img:
+            exif = img.getexif()
+            if not exif:
+                return result
+
+            # Date: DateTimeOriginal (36867) or DateTime (306)
+            date_str = exif.get(ExifBase.DateTimeOriginal) or exif.get(ExifBase.DateTime)
+            if date_str and isinstance(date_str, str):
+                # EXIF format: "2024:06:15 14:30:00" → "2024-06-15"
+                result["date"] = date_str.split(" ")[0].replace(":", "-")
+
+            # Platform / Sensor from Make and Model
+            make = exif.get(ExifBase.Make)
+            model = exif.get(ExifBase.Model)
+            if make and isinstance(make, str):
+                result["platform"] = make.strip()
+            if model and isinstance(model, str):
+                result["sensor"] = model.strip()
+
+    except Exception as exc:
+        logger.warning(f"Could not read EXIF from {file_path}: {exc}")
+
+    return result
+
+
 class LocalCopyRequest(BaseModel):
     file_paths: list[str]
     data_type: str

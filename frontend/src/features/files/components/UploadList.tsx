@@ -8,19 +8,21 @@ import { useFileUpload } from "@/features/files/hooks/useFileUpload";
 interface UploadListProps {
   dataType: string | null;
   formValues: Record<string, string>;
+  onFilesSelected?: (paths: string[]) => void;
 }
 
 function fileNameFromPath(path: string): string {
   return path.split(/[\\/]/).pop() || path;
 }
 
-export function UploadList({ dataType, formValues }: UploadListProps) {
+export function UploadList({ dataType, formValues, onFilesSelected }: UploadListProps) {
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
   const { uploadFiles } = useFileUpload();
 
   const addFiles = (paths: string[]) => {
     setSelectedPaths((prev) => [...prev, ...paths]);
+    onFilesSelected?.(paths);
   };
 
   const removeFile = (index: number) => {

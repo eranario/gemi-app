@@ -124,6 +124,26 @@ export class FilesService {
     }
 
     /**
+     * Extract Metadata
+     * Read EXIF metadata from a local file.
+     * @param data The data for the request.
+     * @param data.filePath Local file path to read EXIF from
+     * @returns object with date, platform, sensor (nullable)
+     * @throws ApiError
+     */
+    public static extractMetadata(data: { filePath: string }): CancelablePromise<{ date: string | null; platform: string | null; sensor: string | null }> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/files/extract-metadata',
+            body: { file_path: data.filePath },
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
      * Copy Local Files
      * @param data The data for the request.
      * @param data.requestBody
