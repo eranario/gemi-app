@@ -1,10 +1,13 @@
+import json
 import logging
 import shutil
 import uuid
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.api.deps import CurrentUser, SessionDep
@@ -130,3 +133,90 @@ def copy_local_files(
         saved.append(str(dest_path))
 
     return {"uploaded": saved, "skipped": skipped, "count": len(saved)}
+
+
+def _sse_event(data: dict) -> str:
+    return f"data: {json.dumps(data)}\n\n"
+
+
+def _copy_local_stream(
+    data_root: str, body: LocalCopyRequest
+) -> Generator[str, None, None]:
+    dest_dir = Path(data_root) / body.target_root_dir
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"SSE stream – destination: {dest_dir}")
+
+    file_names = [Path(p).name for p in body.file_paths]
+    yield _sse_event(
+        {"event": "start", "total": len(body.file_paths), "files": file_names}
+    )
+
+    uploaded: list[str] = []
+    skipped: list[str] = []
+
+    for idx, file_path in enumerate(body.file_paths):
+        src = Path(file_path)
+        name = src.name
+
+        if not src.exists():
+            yield _sse_event(
+                {
+                    "event": "error",
+                    "file": name,
+                    "message": f"Source file not found: {file_path}",
+                    "index": idx,
+                }
+            )
+            continue
+
+        dest_path = dest_dir / name
+
+        if dest_path.exists() and not body.reupload:
+            skipped.append(name)
+            yield _sse_event(
+                {"event": "progress", "file": name, "status": "skipped", "index": idx}
+            )
+            continue
+
+        try:
+            shutil.copy2(src, dest_path)
+            uploaded.append(str(dest_path))
+            yield _sse_event(
+                {
+                    "event": "progress",
+                    "file": name,
+                    "status": "completed",
+                    "index": idx,
+                }
+            )
+        except Exception as exc:
+            yield _sse_event(
+                {"event": "error", "file": name, "message": str(exc), "index": idx}
+            )
+
+    yield _sse_event(
+        {
+            "event": "complete",
+            "uploaded": uploaded,
+            "skipped": skipped,
+            "count": len(uploaded),
+        }
+    )
+
+
+@router.post("/copy-local-stream")
+def copy_local_files_stream(
+    session: SessionDep,
+    body: LocalCopyRequest,
+) -> StreamingResponse:
+    data_root = (
+        get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT
+    )
+    return StreamingResponse(
+        _copy_local_stream(data_root, body),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )

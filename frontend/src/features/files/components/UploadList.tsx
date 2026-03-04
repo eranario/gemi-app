@@ -2,9 +2,8 @@ import { File, X, ChevronDown, ChevronUp } from "lucide-react";
 import { useState } from "react";
 import { UploadZone } from "./UploadZone";
 import { Button } from "@/components/ui/button";
-import { FilesService } from "@/client";
 import { dataTypes } from "@/config/dataTypes";
-import { toast } from "sonner";
+import { useFileUpload } from "@/features/files/hooks/useFileUpload";
 
 interface UploadListProps {
   dataType: string | null;
@@ -18,6 +17,7 @@ function fileNameFromPath(path: string): string {
 export function UploadList({ dataType, formValues }: UploadListProps) {
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
+  const { uploadFiles } = useFileUpload();
 
   const addFiles = (paths: string[]) => {
     setSelectedPaths((prev) => [...prev, ...paths]);
@@ -27,56 +27,33 @@ export function UploadList({ dataType, formValues }: UploadListProps) {
     setSelectedPaths((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleUploadClick = async () => {
-    console.log("Selected dataType: ", dataType);
-
+  const handleUploadClick = () => {
     if (!dataType) return;
 
     const selectedDataType =
       dataTypes[dataType as keyof typeof dataTypes];
-    console.log(selectedDataType);
 
     if (!selectedDataType) {
-      console.error(
-        "Cannot access data type config or selecting data type error."
-      );
-      toast.error(
-        "Cannot access data type config or selecting data type error."
-      );
       return;
     }
 
-    try {
-      const values = { ...formValues };
+    const values = { ...formValues };
 
-      if (values["date"]) {
-        values["year"] = values["date"].split("-")[0];
-      }
-
-      const dirList = selectedDataType.directory;
-      console.log("Defined directory list: ", dirList);
-      console.log("Defined input values: ", values);
-
-      const targetRootDir = dirList
-        .map((field) => values[field.toLowerCase()] || field)
-        .join("/");
-      console.log("Joined directory: ", targetRootDir);
-
-      await FilesService.copyLocalFiles({
-        requestBody: {
-          file_paths: selectedPaths,
-          data_type: dataType,
-          target_root_dir: targetRootDir,
-        },
-      });
-
-      toast.success(`Copied ${selectedPaths.length} file(s) successfully`);
-      setSelectedPaths([]);
-    } catch (error) {
-      console.error("Upload failed:", error);
-      toast.error(`Upload failed: ${error instanceof Error ? error.message : error}`)
+    if (values["date"]) {
+      values["year"] = values["date"].split("-")[0];
     }
 
+    const targetRootDir = selectedDataType.directory
+      .map((field) => values[field.toLowerCase()] || field)
+      .join("/");
+
+    uploadFiles({
+      filePaths: selectedPaths,
+      dataType,
+      targetRootDir,
+    });
+
+    setSelectedPaths([]);
   };
 
   return (
