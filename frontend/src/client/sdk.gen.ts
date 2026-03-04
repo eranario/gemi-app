@@ -116,7 +116,7 @@ export class FilesService {
      * @returns unknown Successful Response
      * @throws ApiError
      */
-    public static syncFiles(): CancelablePromise<{ synced: number; missing: number }> {
+    public static syncFiles(): CancelablePromise<{ synced: number; removed: number }> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/files/sync'
