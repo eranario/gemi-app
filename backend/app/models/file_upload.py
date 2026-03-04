@@ -36,6 +36,7 @@ class FileUploadUpdate(SQLModel):
     sensor: str | None = Field(default=None, max_length=255)
     storage_path: str | None = Field(default=None, max_length=1000)
     status: str | None = Field(default=None, max_length=50)
+    file_count: int | None = None
     notes: str | None = Field(default=None, max_length=1000)
 
 

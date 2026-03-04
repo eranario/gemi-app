@@ -111,6 +111,19 @@ export class FilesService {
     }
     
     /**
+     * Sync Files
+     * Reconcile DB records with files on disk.
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static syncFiles(): CancelablePromise<{ synced: number; missing: number }> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/files/sync'
+        });
+    }
+
+    /**
      * Copy Local Files
      * @param data The data for the request.
      * @param data.requestBody

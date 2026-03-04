@@ -1,7 +1,12 @@
+import logging
 import uuid
+from pathlib import Path
 
 from sqlmodel import Session, select
-from app.models import FileUploadCreate, FileUpload, FileUploadUpdate
+
+from app.models import FileUpload, FileUploadCreate, FileUploadUpdate
+
+logger = logging.getLogger(__name__)
 
 
 def create_file_upload(
@@ -56,3 +61,58 @@ def delete_file_upload(*, session: Session, id: uuid.UUID) -> None:
         raise ValueError("FileUpload not found")
     session.delete(file_upload)
     session.commit()
+
+
+def sync_file_uploads(
+    *, session: Session, data_root: str
+) -> dict[str, int]:
+    """Reconcile DB records with files on disk.
+
+    - If a record was already marked "missing" and the directory is still gone,
+      delete the record entirely (cleanup stale entries).
+    - If a directory has just disappeared, mark the record as "missing" so the
+      user sees it on the next sync and it gets cleaned up then.
+    - If file counts differ, update them.
+    """
+    root = Path(data_root)
+    records = session.exec(select(FileUpload)).all()
+
+    synced = 0
+    removed = 0
+
+    for record in records:
+        dir_path = root / record.storage_path
+        dir_gone = not dir_path.exists() or not dir_path.is_dir()
+        empty = (not dir_gone) and sum(1 for f in dir_path.iterdir() if f.is_file()) == 0
+
+        if dir_gone or empty:
+            if record.status == "missing":
+                # Already flagged — remove stale record
+                logger.info(f"sync: removing stale record – {record.storage_path}")
+                session.delete(record)
+                removed += 1
+            else:
+                record.status = "missing"
+                session.add(record)
+                logger.info(f"sync: marked missing – {record.storage_path}")
+                synced += 1
+            continue
+
+        actual_count = sum(1 for f in dir_path.iterdir() if f.is_file())
+        changed = False
+        if record.file_count != actual_count:
+            logger.info(
+                f"sync: file_count {record.file_count} → {actual_count} – {record.storage_path}"
+            )
+            record.file_count = actual_count
+            changed = True
+        if record.status == "missing":
+            record.status = "completed"
+            changed = True
+        if changed:
+            session.add(record)
+            synced += 1
+
+    session.commit()
+    logger.info(f"sync complete: synced={synced}, removed={removed}")
+    return {"synced": synced, "removed": removed}

@@ -51,6 +51,7 @@ export function UploadList({ dataType, formValues }: UploadListProps) {
       filePaths: selectedPaths,
       dataType,
       targetRootDir,
+      formValues: values,
     });
 
     setSelectedPaths([]);

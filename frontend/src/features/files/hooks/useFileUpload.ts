@@ -7,6 +7,7 @@ interface UploadParams {
   dataType: string
   targetRootDir: string
   reupload?: boolean
+  formValues?: Record<string, string>
 }
 
 function fileNameFromPath(path: string): string {
@@ -17,7 +18,7 @@ export function useFileUpload() {
   const { addProcess, updateProcess, updateProcessItem } = useProcess()
 
   const uploadFiles = useCallback(
-    async ({ filePaths, dataType, targetRootDir, reupload = false }: UploadParams) => {
+    async ({ filePaths, dataType, targetRootDir, reupload = false, formValues = {} }: UploadParams) => {
       const items: ProcessItem[] = filePaths.map((p, i) => ({
         id: String(i),
         name: fileNameFromPath(p),
@@ -48,6 +49,12 @@ export function useFileUpload() {
               data_type: dataType,
               target_root_dir: targetRootDir,
               reupload,
+              experiment: formValues.experiment || null,
+              location: formValues.location || null,
+              population: formValues.population || null,
+              date: formValues.date || null,
+              platform: formValues.platform || null,
+              sensor: formValues.sensor || null,
             }),
           },
         )

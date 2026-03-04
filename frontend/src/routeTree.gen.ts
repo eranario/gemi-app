@@ -19,6 +19,7 @@ import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
 import { Route as LayoutItemsRouteImport } from './routes/_layout/items'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
 import { Route as LayoutFilesUpload_dataRouteImport } from './routes/_layout/files/upload_data'
+import { Route as LayoutFilesManage_dataRouteImport } from './routes/_layout/files/manage_data'
 
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
@@ -69,6 +70,11 @@ const LayoutFilesUpload_dataRoute = LayoutFilesUpload_dataRouteImport.update({
   path: '/files/upload_data',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutFilesManage_dataRoute = LayoutFilesManage_dataRouteImport.update({
+  id: '/files/manage_data',
+  path: '/files/manage_data',
+  getParentRoute: () => LayoutRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
@@ -79,6 +85,7 @@ export interface FileRoutesByFullPath {
   '/items': typeof LayoutItemsRoute
   '/settings': typeof LayoutSettingsRoute
   '/': typeof LayoutIndexRoute
+  '/files/manage_data': typeof LayoutFilesManage_dataRoute
   '/files/upload_data': typeof LayoutFilesUpload_dataRoute
 }
 export interface FileRoutesByTo {
@@ -90,6 +97,7 @@ export interface FileRoutesByTo {
   '/items': typeof LayoutItemsRoute
   '/settings': typeof LayoutSettingsRoute
   '/': typeof LayoutIndexRoute
+  '/files/manage_data': typeof LayoutFilesManage_dataRoute
   '/files/upload_data': typeof LayoutFilesUpload_dataRoute
 }
 export interface FileRoutesById {
@@ -103,6 +111,7 @@ export interface FileRoutesById {
   '/_layout/items': typeof LayoutItemsRoute
   '/_layout/settings': typeof LayoutSettingsRoute
   '/_layout/': typeof LayoutIndexRoute
+  '/_layout/files/manage_data': typeof LayoutFilesManage_dataRoute
   '/_layout/files/upload_data': typeof LayoutFilesUpload_dataRoute
 }
 export interface FileRouteTypes {
@@ -116,6 +125,7 @@ export interface FileRouteTypes {
     | '/items'
     | '/settings'
     | '/'
+    | '/files/manage_data'
     | '/files/upload_data'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -127,6 +137,7 @@ export interface FileRouteTypes {
     | '/items'
     | '/settings'
     | '/'
+    | '/files/manage_data'
     | '/files/upload_data'
   id:
     | '__root__'
@@ -139,6 +150,7 @@ export interface FileRouteTypes {
     | '/_layout/items'
     | '/_layout/settings'
     | '/_layout/'
+    | '/_layout/files/manage_data'
     | '/_layout/files/upload_data'
   fileRoutesById: FileRoutesById
 }
@@ -222,6 +234,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutFilesUpload_dataRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/files/manage_data': {
+      id: '/_layout/files/manage_data'
+      path: '/files/manage_data'
+      fullPath: '/files/manage_data'
+      preLoaderRoute: typeof LayoutFilesManage_dataRouteImport
+      parentRoute: typeof LayoutRoute
+    }
   }
 }
 
@@ -230,6 +249,7 @@ interface LayoutRouteChildren {
   LayoutItemsRoute: typeof LayoutItemsRoute
   LayoutSettingsRoute: typeof LayoutSettingsRoute
   LayoutIndexRoute: typeof LayoutIndexRoute
+  LayoutFilesManage_dataRoute: typeof LayoutFilesManage_dataRoute
   LayoutFilesUpload_dataRoute: typeof LayoutFilesUpload_dataRoute
 }
 
@@ -238,6 +258,7 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutItemsRoute: LayoutItemsRoute,
   LayoutSettingsRoute: LayoutSettingsRoute,
   LayoutIndexRoute: LayoutIndexRoute,
+  LayoutFilesManage_dataRoute: LayoutFilesManage_dataRoute,
   LayoutFilesUpload_dataRoute: LayoutFilesUpload_dataRoute,
 }
 

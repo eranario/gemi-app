@@ -18,6 +18,7 @@ from app.crud.file_upload import (
     delete_file_upload,
     get_file_upload,
     get_file_uploads_by_owner,
+    sync_file_uploads,
     update_file_upload,
 )
 from app.models import (
@@ -95,8 +96,24 @@ def delete_file(
         raise HTTPException(status_code=404, detail="File not found")
     if not current_user.is_superuser and file.owner_id != current_user.id:
         raise HTTPException(status_code=400, detail="Not enough permissions")
+
+    # Remove files from disk
+    data_root = get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT
+    dir_path = Path(data_root) / file.storage_path
+    if dir_path.exists() and dir_path.is_dir():
+        shutil.rmtree(dir_path)
+        logger.info(f"Deleted directory: {dir_path}")
+
     delete_file_upload(session=session, id=id)
     return Message(message="File deleted successfully")
+
+
+# POST /files/sync (reconcile DB with disk)
+@router.post("/sync")
+def sync_files(session: SessionDep, current_user: CurrentUser) -> Any:
+    data_root = get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT
+    result = sync_file_uploads(session=session, data_root=data_root)
+    return result
 
 
 class LocalCopyRequest(BaseModel):
@@ -104,6 +121,13 @@ class LocalCopyRequest(BaseModel):
     data_type: str
     target_root_dir: str
     reupload: bool = False
+    # Metadata fields for DB record
+    experiment: str | None = None
+    location: str | None = None
+    population: str | None = None
+    date: str | None = None
+    platform: str | None = None
+    sensor: str | None = None
 
 
 # copy local files directly on disk (faster for desktop/Tauri)
@@ -140,7 +164,7 @@ def _sse_event(data: dict) -> str:
 
 
 def _copy_local_stream(
-    data_root: str, body: LocalCopyRequest
+    data_root: str, body: LocalCopyRequest, file_upload_id: uuid.UUID, session: Any
 ) -> Generator[str, None, None]:
     dest_dir = Path(data_root) / body.target_root_dir
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -194,6 +218,17 @@ def _copy_local_stream(
                 {"event": "error", "file": name, "message": str(exc), "index": idx}
             )
 
+    # Update the FileUpload record with final status
+    db_file = get_file_upload(session=session, id=file_upload_id)
+    if db_file:
+        update_file_upload(
+            session=session,
+            db_file=db_file,
+            file_in=FileUploadUpdate(
+                status="completed", file_count=len(uploaded)
+            ),
+        )
+
     yield _sse_event(
         {
             "event": "complete",
@@ -207,13 +242,34 @@ def _copy_local_stream(
 @router.post("/copy-local-stream")
 def copy_local_files_stream(
     session: SessionDep,
+    current_user: CurrentUser,
     body: LocalCopyRequest,
 ) -> StreamingResponse:
-    data_root = (
-        get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT
+    data_root = get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT
+
+    # Create a FileUpload record with status="processing"
+    file_upload = create_file_upload(
+        session=session,
+        file_in=FileUploadCreate(
+            data_type=body.data_type,
+            experiment=body.experiment or "",
+            location=body.location or "",
+            population=body.population or "",
+            date=body.date or "",
+            platform=body.platform,
+            sensor=body.sensor,
+            storage_path=body.target_root_dir,
+        ),
+        owner_id=current_user.id,
     )
+    update_file_upload(
+        session=session,
+        db_file=file_upload,
+        file_in=FileUploadUpdate(status="processing", file_count=len(body.file_paths)),
+    )
+
     return StreamingResponse(
-        _copy_local_stream(data_root, body),
+        _copy_local_stream(data_root, body, file_upload.id, session),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
