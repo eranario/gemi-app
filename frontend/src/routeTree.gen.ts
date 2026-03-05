@@ -18,8 +18,12 @@ import { Route as LayoutIndexRouteImport } from './routes/_layout/index'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
 import { Route as LayoutItemsRouteImport } from './routes/_layout/items'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
+import { Route as LayoutProcessIndexRouteImport } from './routes/_layout/process/index'
+import { Route as LayoutProcessWorkspaceIdRouteImport } from './routes/_layout/process/$workspaceId'
 import { Route as LayoutFilesUpload_dataRouteImport } from './routes/_layout/files/upload_data'
 import { Route as LayoutFilesManage_dataRouteImport } from './routes/_layout/files/manage_data'
+import { Route as LayoutProcessWorkspaceIdIndexRouteImport } from './routes/_layout/process/$workspaceId/index'
+import { Route as LayoutProcessWorkspaceIdPipelineRouteImport } from './routes/_layout/process/$workspaceId/pipeline'
 
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
@@ -65,6 +69,17 @@ const LayoutAdminRoute = LayoutAdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutProcessIndexRoute = LayoutProcessIndexRouteImport.update({
+  id: '/process/',
+  path: '/process/',
+  getParentRoute: () => LayoutRoute,
+} as any)
+const LayoutProcessWorkspaceIdRoute =
+  LayoutProcessWorkspaceIdRouteImport.update({
+    id: '/process/$workspaceId',
+    path: '/process/$workspaceId',
+    getParentRoute: () => LayoutRoute,
+  } as any)
 const LayoutFilesUpload_dataRoute = LayoutFilesUpload_dataRouteImport.update({
   id: '/files/upload_data',
   path: '/files/upload_data',
@@ -75,6 +90,18 @@ const LayoutFilesManage_dataRoute = LayoutFilesManage_dataRouteImport.update({
   path: '/files/manage_data',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutProcessWorkspaceIdIndexRoute =
+  LayoutProcessWorkspaceIdIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => LayoutProcessWorkspaceIdRoute,
+  } as any)
+const LayoutProcessWorkspaceIdPipelineRoute =
+  LayoutProcessWorkspaceIdPipelineRouteImport.update({
+    id: '/pipeline',
+    path: '/pipeline',
+    getParentRoute: () => LayoutProcessWorkspaceIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
@@ -87,6 +114,10 @@ export interface FileRoutesByFullPath {
   '/': typeof LayoutIndexRoute
   '/files/manage_data': typeof LayoutFilesManage_dataRoute
   '/files/upload_data': typeof LayoutFilesUpload_dataRoute
+  '/process/$workspaceId': typeof LayoutProcessWorkspaceIdRouteWithChildren
+  '/process': typeof LayoutProcessIndexRoute
+  '/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
+  '/process/$workspaceId/': typeof LayoutProcessWorkspaceIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
@@ -99,6 +130,9 @@ export interface FileRoutesByTo {
   '/': typeof LayoutIndexRoute
   '/files/manage_data': typeof LayoutFilesManage_dataRoute
   '/files/upload_data': typeof LayoutFilesUpload_dataRoute
+  '/process': typeof LayoutProcessIndexRoute
+  '/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
+  '/process/$workspaceId': typeof LayoutProcessWorkspaceIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -113,6 +147,10 @@ export interface FileRoutesById {
   '/_layout/': typeof LayoutIndexRoute
   '/_layout/files/manage_data': typeof LayoutFilesManage_dataRoute
   '/_layout/files/upload_data': typeof LayoutFilesUpload_dataRoute
+  '/_layout/process/$workspaceId': typeof LayoutProcessWorkspaceIdRouteWithChildren
+  '/_layout/process/': typeof LayoutProcessIndexRoute
+  '/_layout/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
+  '/_layout/process/$workspaceId/': typeof LayoutProcessWorkspaceIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -127,6 +165,10 @@ export interface FileRouteTypes {
     | '/'
     | '/files/manage_data'
     | '/files/upload_data'
+    | '/process/$workspaceId'
+    | '/process'
+    | '/process/$workspaceId/pipeline'
+    | '/process/$workspaceId/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
@@ -139,6 +181,9 @@ export interface FileRouteTypes {
     | '/'
     | '/files/manage_data'
     | '/files/upload_data'
+    | '/process'
+    | '/process/$workspaceId/pipeline'
+    | '/process/$workspaceId'
   id:
     | '__root__'
     | '/_layout'
@@ -152,6 +197,10 @@ export interface FileRouteTypes {
     | '/_layout/'
     | '/_layout/files/manage_data'
     | '/_layout/files/upload_data'
+    | '/_layout/process/$workspaceId'
+    | '/_layout/process/'
+    | '/_layout/process/$workspaceId/pipeline'
+    | '/_layout/process/$workspaceId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -227,6 +276,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutAdminRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/process/': {
+      id: '/_layout/process/'
+      path: '/process'
+      fullPath: '/process'
+      preLoaderRoute: typeof LayoutProcessIndexRouteImport
+      parentRoute: typeof LayoutRoute
+    }
+    '/_layout/process/$workspaceId': {
+      id: '/_layout/process/$workspaceId'
+      path: '/process/$workspaceId'
+      fullPath: '/process/$workspaceId'
+      preLoaderRoute: typeof LayoutProcessWorkspaceIdRouteImport
+      parentRoute: typeof LayoutRoute
+    }
     '/_layout/files/upload_data': {
       id: '/_layout/files/upload_data'
       path: '/files/upload_data'
@@ -241,8 +304,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutFilesManage_dataRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/process/$workspaceId/': {
+      id: '/_layout/process/$workspaceId/'
+      path: '/'
+      fullPath: '/process/$workspaceId/'
+      preLoaderRoute: typeof LayoutProcessWorkspaceIdIndexRouteImport
+      parentRoute: typeof LayoutProcessWorkspaceIdRoute
+    }
+    '/_layout/process/$workspaceId/pipeline': {
+      id: '/_layout/process/$workspaceId/pipeline'
+      path: '/pipeline'
+      fullPath: '/process/$workspaceId/pipeline'
+      preLoaderRoute: typeof LayoutProcessWorkspaceIdPipelineRouteImport
+      parentRoute: typeof LayoutProcessWorkspaceIdRoute
+    }
   }
 }
+
+interface LayoutProcessWorkspaceIdRouteChildren {
+  LayoutProcessWorkspaceIdPipelineRoute: typeof LayoutProcessWorkspaceIdPipelineRoute
+  LayoutProcessWorkspaceIdIndexRoute: typeof LayoutProcessWorkspaceIdIndexRoute
+}
+
+const LayoutProcessWorkspaceIdRouteChildren: LayoutProcessWorkspaceIdRouteChildren =
+  {
+    LayoutProcessWorkspaceIdPipelineRoute:
+      LayoutProcessWorkspaceIdPipelineRoute,
+    LayoutProcessWorkspaceIdIndexRoute: LayoutProcessWorkspaceIdIndexRoute,
+  }
+
+const LayoutProcessWorkspaceIdRouteWithChildren =
+  LayoutProcessWorkspaceIdRoute._addFileChildren(
+    LayoutProcessWorkspaceIdRouteChildren,
+  )
 
 interface LayoutRouteChildren {
   LayoutAdminRoute: typeof LayoutAdminRoute
@@ -251,6 +345,8 @@ interface LayoutRouteChildren {
   LayoutIndexRoute: typeof LayoutIndexRoute
   LayoutFilesManage_dataRoute: typeof LayoutFilesManage_dataRoute
   LayoutFilesUpload_dataRoute: typeof LayoutFilesUpload_dataRoute
+  LayoutProcessWorkspaceIdRoute: typeof LayoutProcessWorkspaceIdRouteWithChildren
+  LayoutProcessIndexRoute: typeof LayoutProcessIndexRoute
 }
 
 const LayoutRouteChildren: LayoutRouteChildren = {
@@ -260,6 +356,8 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutIndexRoute: LayoutIndexRoute,
   LayoutFilesManage_dataRoute: LayoutFilesManage_dataRoute,
   LayoutFilesUpload_dataRoute: LayoutFilesUpload_dataRoute,
+  LayoutProcessWorkspaceIdRoute: LayoutProcessWorkspaceIdRouteWithChildren,
+  LayoutProcessIndexRoute: LayoutProcessIndexRoute,
 }
 
 const LayoutRouteWithChildren =

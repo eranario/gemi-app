@@ -1,4 +1,9 @@
 import { useSuspenseQuery } from "@tanstack/react-query"
+import {
+  getCoreRowModel,
+  getPaginationRowModel,
+  useReactTable,
+} from "@tanstack/react-table"
 import { createFileRoute } from "@tanstack/react-router"
 import { Suspense } from "react"
 
@@ -36,7 +41,14 @@ function UsersTableContent() {
     isCurrentUser: currentUser?.id === user.id,
   }))
 
-  return <DataTable columns={columns} data={tableData} />
+  const table = useReactTable({
+    data: tableData,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+  })
+
+  return <DataTable table={table} />
 }
 
 function UsersTable() {

@@ -1,4 +1,9 @@
 import { useSuspenseQuery } from "@tanstack/react-query"
+import {
+  getCoreRowModel,
+  getPaginationRowModel,
+  useReactTable,
+} from "@tanstack/react-table"
 import { createFileRoute } from "@tanstack/react-router"
 import { Search } from "lucide-react"
 import { Suspense } from "react"
@@ -30,6 +35,13 @@ export const Route = createFileRoute("/_layout/items")({
 function ItemsTableContent() {
   const { data: items } = useSuspenseQuery(getItemsQueryOptions())
 
+  const table = useReactTable({
+    data: items.data,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+  })
+
   if (items.data.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center text-center py-12">
@@ -42,7 +54,7 @@ function ItemsTableContent() {
     )
   }
 
-  return <DataTable columns={columns} data={items.data} />
+  return <DataTable table={table} />
 }
 
 function ItemsTable() {

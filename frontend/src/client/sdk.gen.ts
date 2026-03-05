@@ -144,6 +144,35 @@ export class FilesService {
     }
 
     /**
+     * Get Field Values
+     * Returns distinct non-empty values for autocomplete suggestions, with cascading filters.
+     * @param data Optional filter params (data_type, experiment, location, population, platform, sensor)
+     * @returns Record of field name to string array
+     * @throws ApiError
+     */
+    public static getFieldValues(data: {
+        dataType?: string;
+        experiment?: string;
+        location?: string;
+        population?: string;
+        platform?: string;
+        sensor?: string;
+    } = {}): CancelablePromise<Record<string, string[]>> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/files/field-values',
+            query: {
+                data_type: data.dataType,
+                experiment: data.experiment,
+                location: data.location,
+                population: data.population,
+                platform: data.platform,
+                sensor: data.sensor
+            }
+        });
+    }
+
+    /**
      * Copy Local Files
      * @param data The data for the request.
      * @param data.requestBody

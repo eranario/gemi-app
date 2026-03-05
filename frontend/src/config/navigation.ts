@@ -5,19 +5,19 @@ import {
   type LucideIcon,
   Play,
   Users,
-} from "lucide-react"
+} from "lucide-react";
 
 export type SubItem = {
-  title: string
-  path: string
-}
+  title: string;
+  path: string;
+};
 
 export type NavItem = {
-  icon: LucideIcon
-  title: string
-  path: string
-  subItems?: SubItem[]
-}
+  icon: LucideIcon;
+  title: string;
+  path: string;
+  subItems?: SubItem[];
+};
 
 export const sidebarItems: NavItem[] = [
   { icon: Home, title: "Home", path: "/" },
@@ -34,11 +34,6 @@ export const sidebarItems: NavItem[] = [
     icon: Play,
     title: "Process",
     path: "/process",
-    subItems: [
-      { title: "Generate Mosaic", path: "/process/generate_mosaic" },
-      { title: "Set Plots", path: "/process/set_plots" },
-      { title: "Extract Traits", path: "/process/extract_traits" },
-    ],
   },
   {
     icon: ChartSpline,
@@ -50,8 +45,8 @@ export const sidebarItems: NavItem[] = [
       { title: "Image Query", path: "/analyze/image_query" },
     ],
   },
-]
+];
 
 export const adminItems: NavItem[] = [
   { icon: Users, title: "Admin", path: "/admin" },
-]
+];

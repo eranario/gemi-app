@@ -1,10 +1,4 @@
-import {
-  type ColumnDef,
-  flexRender,
-  getCoreRowModel,
-  getPaginationRowModel,
-  useReactTable,
-} from "@tanstack/react-table"
+import { type Table as TanStackTable, flexRender } from "@tanstack/react-table"
 import {
   ChevronLeft,
   ChevronRight,
@@ -29,21 +23,12 @@ import {
   TableRow,
 } from "@/components/ui/table"
 
-interface DataTableProps<TData, TValue> {
-  columns: ColumnDef<TData, TValue>[]
-  data: TData[]
+interface DataTableProps<TData> {
+  table: TanStackTable<TData>
 }
 
-export function DataTable<TData, TValue>({
-  columns,
-  data,
-}: DataTableProps<TData, TValue>) {
-  const table = useReactTable({
-    data,
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-  })
+export function DataTable<TData>({ table }: DataTableProps<TData>) {
+  const totalRows = table.getFilteredRowModel().rows.length
 
   return (
     <div className="flex flex-col gap-4">
@@ -80,7 +65,7 @@ export function DataTable<TData, TValue>({
           ) : (
             <TableRow className="hover:bg-transparent">
               <TableCell
-                colSpan={columns.length}
+                colSpan={table.getAllColumns().length}
                 className="h-32 text-center text-muted-foreground"
               >
                 No results found.
@@ -102,10 +87,10 @@ export function DataTable<TData, TValue>({
               {Math.min(
                 (table.getState().pagination.pageIndex + 1) *
                   table.getState().pagination.pageSize,
-                data.length,
+                totalRows,
               )}{" "}
               of{" "}
-              <span className="font-medium text-foreground">{data.length}</span>{" "}
+              <span className="font-medium text-foreground">{totalRows}</span>{" "}
               entries
             </div>
             <div className="flex items-center gap-x-2">

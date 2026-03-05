@@ -16,6 +16,7 @@ from app.crud.app_settings import get_setting
 from app.crud.file_upload import (
     create_file_upload,
     delete_file_upload,
+    get_distinct_field_values,
     get_file_upload,
     get_file_uploads_by_owner,
     sync_file_uploads,
@@ -54,6 +55,29 @@ def read_files(
     )
     return FileUploadsPublic(
         data=[FileUploadPublic.model_validate(f) for f in files], count=len(files)
+    )
+
+
+# GET /files/field-values (distinct values for autocomplete)
+@router.get("/field-values")
+def read_field_values(
+    session: SessionDep,
+    current_user: CurrentUser,
+    data_type: str | None = None,
+    experiment: str | None = None,
+    location: str | None = None,
+    population: str | None = None,
+    platform: str | None = None,
+    sensor: str | None = None,
+) -> dict[str, list[str]]:
+    return get_distinct_field_values(
+        session=session,
+        data_type=data_type,
+        experiment=experiment,
+        location=location,
+        population=population,
+        platform=platform,
+        sensor=sensor,
     )
 
 
