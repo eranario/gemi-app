@@ -1,5 +1,6 @@
 import { useCallback } from "react"
 import { useProcess } from "@/contexts/ProcessContext"
+import useCustomToast from "@/hooks/useCustomToast"
 import type { ProcessItem } from "@/types/process"
 
 interface UploadParams {
@@ -16,6 +17,7 @@ function fileNameFromPath(path: string): string {
 
 export function useFileUpload() {
   const { addProcess, updateProcess, updateProcessItem } = useProcess()
+  const { showErrorToastWithCopy } = useCustomToast()
 
   const uploadFiles = useCallback(
     async ({ filePaths, dataType, targetRootDir, reupload = false, formValues = {} }: UploadParams) => {
@@ -61,10 +63,12 @@ export function useFileUpload() {
 
         if (!response.ok) {
           const errorText = await response.text()
+          const errorMsg = `Server error: ${response.status} - ${errorText}`
           updateProcess(processId, {
             status: "error",
-            error: `Server error: ${response.status} - ${errorText}`,
+            error: errorMsg,
           })
+          showErrorToastWithCopy(errorMsg)
           return
         }
 
@@ -131,13 +135,15 @@ export function useFileUpload() {
         // Stream ended — the "complete" event handler above already
         // marked the process. Nothing else to do here.
       } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err)
         updateProcess(processId, {
           status: "error",
-          error: err instanceof Error ? err.message : String(err),
+          error: errorMsg,
         })
+        showErrorToastWithCopy(errorMsg)
       }
     },
-    [addProcess, updateProcess, updateProcessItem],
+    [addProcess, updateProcess, updateProcessItem, showErrorToastWithCopy],
   )
 
   return { uploadFiles }

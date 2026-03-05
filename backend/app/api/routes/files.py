@@ -139,15 +139,16 @@ def extract_metadata(body: dict[str, str]) -> Any:
             date_str = exif.get(ExifBase.DateTimeOriginal) or exif.get(ExifBase.DateTime)
             if date_str and isinstance(date_str, str):
                 # EXIF format: "2024:06:15 14:30:00" → "2024-06-15"
-                result["date"] = date_str.split(" ")[0].replace(":", "-")
+                result["date"] = date_str.replace("\x00", "").split(" ")[0].replace(":", "-")
 
             # Platform / Sensor from Make and Model
+            # EXIF strings can contain null bytes — strip them
             make = exif.get(ExifBase.Make)
             model = exif.get(ExifBase.Model)
             if make and isinstance(make, str):
-                result["platform"] = make.strip()
+                result["platform"] = make.replace("\x00", "").strip()
             if model and isinstance(model, str):
-                result["sensor"] = model.strip()
+                result["sensor"] = model.replace("\x00", "").strip()
 
     except Exception as exc:
         logger.warning(f"Could not read EXIF from {file_path}: {exc}")
@@ -205,7 +206,7 @@ def _sse_event(data: dict) -> str:
 def _copy_local_stream(
     data_root: str, body: LocalCopyRequest, file_upload_id: uuid.UUID, session: Any
 ) -> Generator[str, None, None]:
-    dest_dir = Path(data_root) / body.target_root_dir
+    dest_dir = Path(data_root) / body.target_root_dir.replace("\x00", "")
     dest_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"SSE stream – destination: {dest_dir}")
 

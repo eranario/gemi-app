@@ -13,7 +13,18 @@ const useCustomToast = () => {
     })
   }
 
-  return { showSuccessToast, showErrorToast }
+  const showErrorToastWithCopy = (description: string) => {
+    toast.error("Something went wrong!", {
+      description,
+      duration: Infinity,
+      action: {
+        label: "Copy",
+        onClick: () => navigator.clipboard.writeText(description),
+      },
+    })
+  }
+
+  return { showSuccessToast, showErrorToast, showErrorToastWithCopy }
 }
 
 export default useCustomToast
