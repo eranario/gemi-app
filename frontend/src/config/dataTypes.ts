@@ -1,6 +1,13 @@
 export const dataTypes = {
   "Image Data": {
-    fields: ["experiment", "location", "population", "date", "platform", "sensor"],
+    fields: [
+      "experiment",
+      "location",
+      "population",
+      "date",
+      "platform",
+      "sensor",
+    ],
     fileType: "image/*",
     directory: [
       "Raw",
@@ -25,7 +32,7 @@ export const dataTypes = {
       "Population",
       "Date",
       "Platform",
-      "Logs",
+      "Metadata",
     ],
   },
   "Farm-ng Binary File": {
@@ -38,11 +45,20 @@ export const dataTypes = {
       "Location",
       "Population",
       "Date",
-      "BinaryFiles",
+      "Amiga",
+      "RGB",
+      "Images",
     ],
   },
   Orthomosaic: {
-    fields: ["experiment", "location", "population", "date", "platform", "sensor"],
+    fields: [
+      "experiment",
+      "location",
+      "population",
+      "date",
+      "platform",
+      "sensor",
+    ],
     fileType: ".tif",
     directory: [
       "Raw",
