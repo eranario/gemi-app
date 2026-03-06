@@ -3,27 +3,18 @@
 
 from sqlmodel import SQLModel
 
-from app.models.user import (
-    User,
-    UserBase,
-    UserCreate,
-    UserPublic,
-    UserRegister,
-    UsersPublic,
-    UserUpdate,
-    UserUpdateMe,
-    UpdatePassword,
+from app.models.app_settings import (
+    AppSetting,
+    AppSettingBase,
+    AppSettingPublic,
+    AppSettingUpdate,
 )
-
-from app.models.item import (
-    Item,
-    ItemBase,
-    ItemCreate,
-    ItemPublic,
-    ItemsPublic,
-    ItemUpdate,
+from app.models.common import (
+    Message,
+    NewPassword,
+    Token,
+    TokenPayload,
 )
-
 from app.models.file_upload import (
     FileUpload,
     FileUploadBase,
@@ -32,17 +23,23 @@ from app.models.file_upload import (
     FileUploadsPublic,
     FileUploadUpdate,
 )
-
-from app.models.app_settings import (
-    AppSetting,
-    AppSettingBase,
-    AppSettingPublic,
-    AppSettingUpdate,
+from app.models.item import (
+    Item,
+    ItemBase,
+    ItemCreate,
+    ItemPublic,
+    ItemsPublic,
+    ItemUpdate,
 )
-
-from app.models.common import (
-    Message,
-    NewPassword,
-    Token,
-    TokenPayload,
+from app.models.user import (
+    UpdatePassword,
+    User,
+    UserBase,
+    UserCreate,
+    UserPublic,
+    UserRegister,
+    UsersPublic,
+    UserUpdate,
+    UserUpdateMe,
 )
+from app.models.workspace import Workspace, WorkspaceCreate, WorkspaceUpdate

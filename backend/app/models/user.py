@@ -7,6 +7,7 @@ from sqlmodel import Field, Relationship, SQLModel
 if TYPE_CHECKING:
     from app.models.item import Item
     from app.models.file_upload import FileUpload
+    from app.models.workspace import Workspace
 
 
 # Shared properties
@@ -50,6 +51,7 @@ class User(UserBase, table=True):
     hashed_password: str
     items: list["Item"] = Relationship(back_populates="owner", cascade_delete=True)
     file_uploads: list["FileUpload"] = Relationship(back_populates="owner", cascade_delete=True)
+    workspaces: list["Workspace"] = Relationship(back_populates="owner", cascade_delete=True)
 
 
 # Properties to return via API, id is always required
