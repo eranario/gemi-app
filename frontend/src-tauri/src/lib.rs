@@ -29,6 +29,7 @@ pub fn run() {
         // PRODUCTION MODE — start backend sidecar on a free port, inject URL
         use sidecar_manager::SidecarManager;
         use std::sync::Arc;
+        use tauri::Manager;
 
         let sidecar = Arc::new(SidecarManager::new());
         let sidecar_for_exit = Arc::clone(&sidecar);
