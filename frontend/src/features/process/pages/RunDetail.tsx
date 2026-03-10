@@ -57,9 +57,8 @@ function apiUrl(path: string): string {
   const base = (window as any).__GEMI_BACKEND_URL__ ?? ""
   return base ? `${base}${path}` : path
 }
-import { PlotMarker } from "@/features/process/components/PlotMarker"
 import { GcpPicker } from "@/features/process/components/GcpPicker"
-import { BoundaryDrawer } from "@/features/process/components/BoundaryDrawer"
+import { PlotBoundaryPrep } from "@/features/process/components/PlotBoundaryPrep"
 import { InferenceTool, type InferenceRunConfig } from "@/features/process/components/InferenceTool"
 
 // ── Step definitions ──────────────────────────────────────────────────────────
@@ -75,15 +74,9 @@ interface StepDef {
 
 const GROUND_STEPS: StepDef[] = [
   {
-    key: "plot_marking",
-    label: "Plot Marking",
-    description: "Select start/end images for each plot in the image sequence",
-    kind: "interactive",
-  },
-  {
     key: "stitching",
     label: "Stitching",
-    description: "AgRowStitch stitches images per plot into panoramic mosaics",
+    description: "AgRowStitch stitches images per plot into panoramic mosaics and creates a combined mosaic",
     kind: "compute",
   },
   {
@@ -93,10 +86,16 @@ const GROUND_STEPS: StepDef[] = [
     kind: "compute",
   },
   {
-    key: "plot_boundaries",
-    label: "Plot Boundaries",
-    description: "Review and adjust georeferenced plot footprints overlaid on the combined mosaic",
+    key: "plot_boundary_prep",
+    label: "Plot Boundary Prep",
+    description: "Draw the outer field boundary, configure plot grid dimensions, and auto-generate plot polygons from field design",
     kind: "interactive",
+  },
+  {
+    key: "associate_boundaries",
+    label: "Associate Boundaries",
+    description: "Match each stitched plot to its boundary polygon using GPS containment",
+    kind: "compute",
   },
   {
     key: "inference",
@@ -126,9 +125,9 @@ const AERIAL_STEPS: StepDef[] = [
     kind: "compute",
   },
   {
-    key: "plot_boundaries",
-    label: "Plot Boundaries",
-    description: "Draw plot polygons on the orthomosaic map",
+    key: "plot_boundary_prep",
+    label: "Plot Boundary Prep",
+    description: "Draw the outer field boundary, configure plot grid dimensions, and auto-generate plot polygons from field design",
     kind: "interactive",
   },
   {
@@ -800,16 +799,17 @@ export function RunDetail() {
         )}
 
         {/* Inline interactive tools */}
-        {openTool === "plot_marking" && (
+        {openTool === "plot_boundary_prep" && (
           <Card className="mb-6">
             <CardHeader>
-              <CardTitle>Plot Marker</CardTitle>
+              <CardTitle>Plot Boundary Prep</CardTitle>
               <CardDescription>
-                Navigate through images and mark the start and end frame for each plot row.
+                Draw the outer field boundary on the mosaic, then generate a rectangular plot grid
+                from your field design CSV and dimension settings.
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <PlotMarker
+              <PlotBoundaryPrep
                 runId={runId}
                 onSaved={() => {
                   setOpenTool(null)
@@ -831,29 +831,6 @@ export function RunDetail() {
             </CardHeader>
             <CardContent>
               <GcpPicker
-                runId={runId}
-                onSaved={() => {
-                  setOpenTool(null)
-                  queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] })
-                }}
-                onCancel={() => setOpenTool(null)}
-              />
-            </CardContent>
-          </Card>
-        )}
-
-        {openTool === "plot_boundaries" && (
-          <Card className="mb-6">
-            <CardHeader>
-              <CardTitle>Plot Boundaries</CardTitle>
-              <CardDescription>
-                {pipelineType === "ground"
-                  ? "Review and adjust georeferenced plot footprints overlaid on the combined mosaic. Existing boundaries from georeferencing are pre-loaded."
-                  : "Draw plot polygons on the orthomosaic to define field boundaries."}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <BoundaryDrawer
                 runId={runId}
                 onSaved={() => {
                   setOpenTool(null)

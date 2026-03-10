@@ -156,6 +156,34 @@ class RunPaths:
         return self.intermediate_pipeline / f"Plot-Boundary-WGS84_v{version}.geojson"
 
     @property
+    def field_design_dir(self) -> Path:
+        """Raw/.../FieldDesign/ — field design CSVs uploaded via Files tab (no date/platform)."""
+        return self.data_root / "Raw" / self._pop_seg / "FieldDesign"
+
+    def field_design_csv(self) -> Path | None:
+        """
+        Return the first field design CSV found in the Raw upload dir,
+        or None if not found.  Falls back to intermediate (inline upload).
+        """
+        raw_dir = self.field_design_dir
+        if raw_dir.exists():
+            for p in sorted(raw_dir.iterdir()):
+                if p.suffix.lower() == ".csv":
+                    return p
+        inline = self.field_design_intermediate
+        return inline if inline.exists() else None
+
+    @property
+    def field_design_intermediate(self) -> Path:
+        """Inline field_design.csv saved during plot boundary prep (if not uploaded via Raw)."""
+        return self.intermediate_pipeline / "field_design.csv"
+
+    @property
+    def pop_boundary_geojson(self) -> Path:
+        """Population (outer field) boundary — pipeline level, shared across runs."""
+        return self.intermediate_pipeline / "Pop-Boundary-WGS84.geojson"
+
+    @property
     def gcp_locations_intermediate(self) -> Path:
         """Inline gcp_locations.csv saved during GCP picker step (if not uploaded via Raw)."""
         return self.intermediate_pipeline / "gcp_locations.csv"

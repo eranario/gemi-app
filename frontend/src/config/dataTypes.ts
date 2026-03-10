@@ -85,4 +85,15 @@ export const dataTypes = {
       "WeatherData",
     ],
   },
+  "Field Design": {
+    fields: ["experiment", "location", "population"],
+    fileType: ".csv",
+    directory: [
+      "Raw",
+      "Experiment",
+      "Location",
+      "Population",
+      "FieldDesign",
+    ],
+  },
 };

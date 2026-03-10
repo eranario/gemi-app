@@ -68,7 +68,7 @@ def _get_paths(session: Session, run: PipelineRun) -> RunPaths:
 
 # ── Execute step ──────────────────────────────────────────────────────────────
 
-GROUND_COMPUTE_STEPS = {"stitching", "georeferencing"}
+GROUND_COMPUTE_STEPS = {"stitching", "georeferencing", "associate_boundaries"}
 AERIAL_COMPUTE_STEPS = {"orthomosaic", "trait_extraction"}
 SHARED_COMPUTE_STEPS = {"inference"}
 
@@ -108,6 +108,7 @@ def execute_step(
     # Resolve step function
     if ptype == "ground":
         from app.processing import ground
+        from app.processing import plot_boundary
         dispatch: dict[str, Any] = {
             "stitching": (
                 ground.run_stitching,
@@ -116,6 +117,10 @@ def execute_step(
             "georeferencing": (
                 ground.run_georeferencing,
                 {"agrowstitch_version": body.agrowstitch_version},
+            ),
+            "associate_boundaries": (
+                plot_boundary.run_associate_boundaries,
+                {},
             ),
             "inference": (
                 ground.run_inference,
@@ -329,40 +334,159 @@ def apply_boundaries(
     existing_outputs = dict(run.outputs or {})
     existing_steps = dict(run.steps_completed or {})
 
-    if pipeline and pipeline.type == "aerial":
-        if not paths.plot_boundary_geojson.exists():
-            raise HTTPException(
-                status_code=404,
-                detail=(
-                    "No Plot-Boundary-WGS84.geojson found for this pipeline. "
-                    "Draw plot boundaries on an earlier run first."
-                ),
-            )
-        existing_outputs["plot_boundaries"] = paths.rel(paths.plot_boundary_geojson)
-        existing_steps["plot_boundaries"] = True
-        update_pipeline_run(
-            session=session,
-            db_run=run,
-            run_in=PipelineRunUpdate(steps_completed=existing_steps, outputs=existing_outputs),
+    if not paths.plot_boundary_geojson.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "No Plot-Boundary-WGS84.geojson found for this pipeline. "
+                "Complete the Plot Boundary Prep step on an earlier run first."
+            ),
         )
-        return {"status": "applied", "plot_boundaries": paths.rel(paths.plot_boundary_geojson)}
-    else:
-        if not paths.plot_borders.exists():
-            raise HTTPException(
-                status_code=404,
-                detail=(
-                    "No plot_borders.csv found for this pipeline. "
-                    "Create plot markings on an earlier run first."
-                ),
-            )
-        existing_outputs["plot_marking"] = paths.rel(paths.plot_borders)
-        existing_steps["plot_marking"] = True
-        update_pipeline_run(
-            session=session,
-            db_run=run,
-            run_in=PipelineRunUpdate(steps_completed=existing_steps, outputs=existing_outputs),
-        )
-        return {"status": "applied", "plot_borders": paths.rel(paths.plot_borders)}
+    existing_outputs["plot_boundary_prep"] = paths.rel(paths.plot_boundary_geojson)
+    existing_steps["plot_boundary_prep"] = True
+    update_pipeline_run(
+        session=session,
+        db_run=run,
+        run_in=PipelineRunUpdate(steps_completed=existing_steps, outputs=existing_outputs),
+    )
+    return {"status": "applied", "plot_boundary": paths.rel(paths.plot_boundary_geojson)}
+
+
+# ── Shared: field design ──────────────────────────────────────────────────────
+
+@router.get("/pipeline-runs/{id}/field-design")
+def get_field_design(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> dict[str, Any]:
+    """
+    Check whether a field design CSV exists for this pipeline and return its data.
+
+    Response:
+        {
+          "available": bool,
+          "rows": [...],   # parsed CSV rows (list of dicts)
+          "row_count": int,
+          "col_count": int,
+        }
+    """
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+
+    csv_path = paths.field_design_csv()
+    if not csv_path:
+        return {"available": False, "rows": [], "row_count": 0, "col_count": 0}
+
+    import csv as _csv
+    rows: list[dict[str, str]] = []
+    with open(csv_path, newline="") as f:
+        for row in _csv.DictReader(f):
+            rows.append({k.strip(): v.strip() for k, v in row.items()})
+
+    row_nums = {int(r["row"]) for r in rows if r.get("row", "").isdigit()}
+    col_nums = {int(r["col"]) for r in rows if r.get("col", "").isdigit()}
+
+    return {
+        "available": True,
+        "rows": rows,
+        "row_count": max(row_nums) if row_nums else 0,
+        "col_count": max(col_nums) if col_nums else 0,
+    }
+
+
+class SaveFieldDesignRequest(BaseModel):
+    csv_text: str  # raw CSV content
+
+
+@router.post("/pipeline-runs/{id}/field-design")
+def save_field_design(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    body: SaveFieldDesignRequest,
+) -> dict[str, Any]:
+    """Save field design CSV inline (without going to the Files tab)."""
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+    paths.intermediate_pipeline.mkdir(parents=True, exist_ok=True)
+    paths.field_design_intermediate.write_text(body.csv_text)
+
+    import csv as _csv
+    import io
+    rows: list[dict[str, str]] = []
+    for row in _csv.DictReader(io.StringIO(body.csv_text)):
+        rows.append({k.strip(): v.strip() for k, v in row.items()})
+
+    row_nums = {int(r["row"]) for r in rows if r.get("row", "").isdigit()}
+    col_nums = {int(r["col"]) for r in rows if r.get("col", "").isdigit()}
+
+    return {
+        "status": "saved",
+        "row_count": max(row_nums) if row_nums else 0,
+        "col_count": max(col_nums) if col_nums else 0,
+    }
+
+
+class GeneratePlotGridRequest(BaseModel):
+    pop_boundary: dict[str, Any]   # GeoJSON Feature or FeatureCollection
+    options: dict[str, Any]        # width, length, rows, columns, verticalSpacing, horizontalSpacing, angle
+
+
+@router.post("/pipeline-runs/{id}/generate-plot-grid")
+def generate_plot_grid(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    body: GeneratePlotGridRequest,
+) -> dict[str, Any]:
+    """
+    Generate a rectangular plot grid from the population boundary + grid options.
+    Saves Pop-Boundary-WGS84.geojson and Plot-Boundary-WGS84.geojson at pipeline level.
+    Returns the generated GeoJSON for preview.
+    """
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+    paths.intermediate_pipeline.mkdir(parents=True, exist_ok=True)
+
+    # Save population boundary
+    paths.pop_boundary_geojson.write_text(json.dumps(body.pop_boundary, indent=2))
+
+    from app.processing.plot_boundary import generate_plot_grid as _gen
+    grid_fc = _gen(
+        pop_boundary=body.pop_boundary,
+        options=body.options,
+        field_design_path=paths.field_design_csv(),
+    )
+
+    # Save as the canonical plot boundary file
+    paths.plot_boundary_geojson.write_text(json.dumps(grid_fc, indent=2))
+    logger.info(
+        "Generated plot grid with %d features for run %s",
+        len(grid_fc["features"]),
+        id,
+    )
+
+    # Mark step complete
+    existing_outputs = dict(run.outputs or {})
+    existing_outputs["plot_boundary_prep"] = paths.rel(paths.plot_boundary_geojson)
+    existing_steps = dict(run.steps_completed or {})
+    existing_steps["plot_boundary_prep"] = True
+
+    update_pipeline_run(
+        session=session,
+        db_run=run,
+        run_in=PipelineRunUpdate(steps_completed=existing_steps, outputs=existing_outputs),
+    )
+
+    return {
+        "status": "saved",
+        "feature_count": len(grid_fc["features"]),
+        "geojson": grid_fc,
+        "plot_boundary": paths.rel(paths.plot_boundary_geojson),
+    }
 
 
 # ── Aerial: GCP selection ─────────────────────────────────────────────────────
@@ -813,7 +937,8 @@ def orthomosaic_info(
     pipeline = session.get(Pipeline, run.pipeline_id)
     paths = _get_paths(session, run)
 
-    not_available = {"available": False, "path": None, "bounds": None, "existing_geojson": None}
+    not_available = {"available": False, "path": None, "bounds": None,
+                    "existing_geojson": None, "existing_pop_boundary": None}
 
     if pipeline and pipeline.type == "ground":
         # Ground: combined_mosaic.tif lives inside the georeferencing output dir
@@ -838,11 +963,20 @@ def orthomosaic_info(
                 except Exception:
                     pass
 
+        # Load existing pop boundary if present
+        existing_pop = None
+        if paths.pop_boundary_geojson.exists():
+            try:
+                existing_pop = json.loads(paths.pop_boundary_geojson.read_text())
+            except Exception:
+                pass
+
         return {
             "available": True,
             "path": str(tif),
             "bounds": bounds,
             "existing_geojson": existing_geojson,
+            "existing_pop_boundary": existing_pop,
         }
 
     else:
@@ -860,11 +994,19 @@ def orthomosaic_info(
             except Exception:
                 pass
 
+        existing_pop = None
+        if paths.pop_boundary_geojson.exists():
+            try:
+                existing_pop = json.loads(paths.pop_boundary_geojson.read_text())
+            except Exception:
+                pass
+
         return {
             "available": True,
             "path": str(tif),
             "bounds": bounds,
             "existing_geojson": existing_geojson,
+            "existing_pop_boundary": existing_pop,
         }
 
 

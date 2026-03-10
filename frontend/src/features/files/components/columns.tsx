@@ -108,6 +108,8 @@ const colActions: ColumnDef<FileUploadPublic> = {
 const WITH_PLATFORM_SENSOR = ["Image Data", "Orthomosaic"]
 // Fields that have platform but not sensor
 const WITH_PLATFORM_ONLY = ["Platform Logs"]
+// Fields that have no date/platform/sensor (population-level data)
+const POP_LEVEL_ONLY = ["Field Design"]
 
 const TAIL = [colFiles, colStatus, colUploaded, colActions]
 
@@ -117,6 +119,9 @@ export function getColumnsForDataType(
   if (!dataType) {
     // "All" — show data type column + all fields
     return [colDataType, colExperiment, colLocation, colPopulation, colDate, colPlatform, colSensor, ...TAIL]
+  }
+  if (POP_LEVEL_ONLY.includes(dataType)) {
+    return [colExperiment, colLocation, colPopulation, ...TAIL]
   }
   if (WITH_PLATFORM_SENSOR.includes(dataType)) {
     return [colExperiment, colLocation, colPopulation, colDate, colPlatform, colSensor, ...TAIL]
