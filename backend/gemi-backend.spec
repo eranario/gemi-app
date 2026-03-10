@@ -171,7 +171,10 @@ a = Analysis(
     excludes=[
         # Exclude heavy optional packages not needed at runtime
         'matplotlib', 'tkinter', 'wx', 'IPython', 'notebook',
-        'pytest', 'setuptools', 'distutils',
+        'pytest',
+        # NOTE: do NOT exclude 'setuptools' or 'distutils' — on Python 3.12,
+        # PyInstaller's hook-distutils.py aliases distutils → setuptools._distutils,
+        # and excluding distutils first causes a conflict that crashes the build.
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
