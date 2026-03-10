@@ -18,6 +18,12 @@ export type Body_login_login_access_token = {
     client_secret?: (string | null);
 };
 
+export type ExecuteStepRequest = {
+    step: string;
+    models?: Array<ModelConfig>;
+    agrowstitch_version?: number;
+};
+
 export type FileUploadCreate = {
     data_type: string;
     experiment: string;
@@ -63,7 +69,18 @@ export type FileUploadUpdate = {
     sensor?: (string | null);
     storage_path?: (string | null);
     status?: (string | null);
+    file_count?: (number | null);
     notes?: (string | null);
+};
+
+export type GcpSelectionRequest = {
+    gcp_selections: Array<{
+        [key: string]: unknown;
+    }>;
+    image_gps: Array<{
+        [key: string]: unknown;
+    }>;
+    gcp_locations_csv?: (string | null);
 };
 
 export type HTTPValidationError = {
@@ -97,10 +114,23 @@ export type LocalCopyRequest = {
     data_type: string;
     target_root_dir: string;
     reupload?: boolean;
+    experiment?: (string | null);
+    location?: (string | null);
+    population?: (string | null);
+    date?: (string | null);
+    platform?: (string | null);
+    sensor?: (string | null);
 };
 
 export type Message = {
     message: string;
+};
+
+export type ModelConfig = {
+    label: string;
+    roboflow_api_key: string;
+    roboflow_model_id: string;
+    task_type?: string;
 };
 
 export type NewPassword = {
@@ -108,11 +138,122 @@ export type NewPassword = {
     new_password: string;
 };
 
+export type PipelineCreate = {
+    name: string;
+    type: string;
+    config?: ({
+    [key: string]: unknown;
+} | null);
+    workspace_id: string;
+};
+
+export type PipelinePublic = {
+    name: string;
+    type: string;
+    config?: ({
+    [key: string]: unknown;
+} | null);
+    id: string;
+    workspace_id: string;
+    created_at: string;
+    updated_at: (string | null);
+};
+
+export type PipelineRunCreate = {
+    date: string;
+    experiment: string;
+    location: string;
+    population: string;
+    platform: string;
+    sensor: string;
+    status?: string;
+    current_step?: (string | null);
+    steps_completed?: ({
+    [key: string]: (boolean);
+} | null);
+    outputs?: ({
+    [key: string]: unknown;
+} | null);
+    error?: (string | null);
+    pipeline_id: string;
+    file_upload_id?: (string | null);
+};
+
+export type PipelineRunPublic = {
+    date: string;
+    experiment: string;
+    location: string;
+    population: string;
+    platform: string;
+    sensor: string;
+    status?: string;
+    current_step?: (string | null);
+    steps_completed?: ({
+    [key: string]: (boolean);
+} | null);
+    outputs?: ({
+    [key: string]: unknown;
+} | null);
+    error?: (string | null);
+    id: string;
+    pipeline_id: string;
+    file_upload_id: (string | null);
+    created_at: string;
+    completed_at: (string | null);
+};
+
+export type PipelineRunsPublic = {
+    data: Array<PipelineRunPublic>;
+    count: number;
+};
+
+export type PipelineRunUpdate = {
+    status?: (string | null);
+    current_step?: (string | null);
+    steps_completed?: ({
+    [key: string]: (boolean);
+} | null);
+    outputs?: ({
+    [key: string]: unknown;
+} | null);
+    error?: (string | null);
+    completed_at?: (string | null);
+};
+
+export type PipelinesPublic = {
+    data: Array<PipelinePublic>;
+    count: number;
+};
+
+export type PipelineUpdate = {
+    name?: (string | null);
+    config?: ({
+    [key: string]: unknown;
+} | null);
+};
+
+export type PlotBoundariesRequest = {
+    geojson: {
+        [key: string]: unknown;
+    };
+    version?: (number | null);
+};
+
+export type PlotMarkingRequest = {
+    selections: Array<{
+        [key: string]: unknown;
+    }>;
+};
+
 export type PrivateUserCreate = {
     email: string;
     password: string;
     full_name: string;
     is_verified?: boolean;
+};
+
+export type SaveGcpLocationsRequest = {
+    csv_text: string;
 };
 
 export type Token = {
@@ -171,6 +312,38 @@ export type ValidationError = {
     type: string;
 };
 
+export type WorkspaceCreate = {
+    name: string;
+    description?: (string | null);
+};
+
+export type WorkspacePublic = {
+    name: string;
+    description?: (string | null);
+    id: string;
+    owner_id: string;
+    created_at: string;
+};
+
+export type WorkspacesPublic = {
+    data: Array<WorkspacePublic>;
+    count: number;
+};
+
+export type WorkspaceUpdate = {
+    name?: (string | null);
+    description?: (string | null);
+};
+
+export type FilesServeFileData = {
+    /**
+     * Absolute path to the file on disk
+     */
+    path: string;
+};
+
+export type FilesServeFileResponse = (unknown);
+
 export type FilesCreateFileData = {
     requestBody: FileUploadCreate;
 };
@@ -183,6 +356,19 @@ export type FilesReadFilesData = {
 };
 
 export type FilesReadFilesResponse = (FileUploadsPublic);
+
+export type FilesReadFieldValuesData = {
+    dataType?: (string | null);
+    experiment?: (string | null);
+    location?: (string | null);
+    platform?: (string | null);
+    population?: (string | null);
+    sensor?: (string | null);
+};
+
+export type FilesReadFieldValuesResponse = ({
+    [key: string]: Array<(string)>;
+});
 
 export type FilesReadFileData = {
     id: string;
@@ -203,11 +389,27 @@ export type FilesDeleteFileData = {
 
 export type FilesDeleteFileResponse = (Message);
 
+export type FilesSyncFilesResponse = (unknown);
+
+export type FilesExtractMetadataData = {
+    requestBody: {
+        [key: string]: (string);
+    };
+};
+
+export type FilesExtractMetadataResponse = (unknown);
+
 export type FilesCopyLocalFilesData = {
     requestBody: LocalCopyRequest;
 };
 
 export type FilesCopyLocalFilesResponse = (unknown);
+
+export type FilesCopyLocalFilesStreamData = {
+    requestBody: LocalCopyRequest;
+};
+
+export type FilesCopyLocalFilesStreamResponse = (unknown);
 
 export type ItemsReadItemsData = {
     limit?: number;
@@ -267,11 +469,195 @@ export type LoginRecoverPasswordHtmlContentData = {
 
 export type LoginRecoverPasswordHtmlContentResponse = (string);
 
+export type PipelinesCreateData = {
+    requestBody: PipelineCreate;
+    workspaceId: string;
+};
+
+export type PipelinesCreateResponse = (PipelinePublic);
+
+export type PipelinesReadAllData = {
+    limit?: number;
+    skip?: number;
+    workspaceId: string;
+};
+
+export type PipelinesReadAllResponse = (PipelinesPublic);
+
+export type PipelinesReadOneData = {
+    id: string;
+};
+
+export type PipelinesReadOneResponse = (PipelinePublic);
+
+export type PipelinesUpdateData = {
+    id: string;
+    requestBody: PipelineUpdate;
+};
+
+export type PipelinesUpdateResponse = (PipelinePublic);
+
+export type PipelinesDeleteData = {
+    id: string;
+};
+
+export type PipelinesDeleteResponse = (Message);
+
+export type PipelinesCreateRunData = {
+    pipelineId: string;
+    requestBody: PipelineRunCreate;
+};
+
+export type PipelinesCreateRunResponse = (PipelineRunPublic);
+
+export type PipelinesReadRunsData = {
+    limit?: number;
+    pipelineId: string;
+    skip?: number;
+};
+
+export type PipelinesReadRunsResponse = (PipelineRunsPublic);
+
+export type PipelinesReadRunData = {
+    id: string;
+};
+
+export type PipelinesReadRunResponse = (PipelineRunPublic);
+
+export type PipelinesUpdateRunData = {
+    id: string;
+    requestBody: PipelineRunUpdate;
+};
+
+export type PipelinesUpdateRunResponse = (PipelineRunPublic);
+
+export type PipelinesDeleteRunData = {
+    id: string;
+};
+
+export type PipelinesDeleteRunResponse = (Message);
+
 export type PrivateCreateUserData = {
     requestBody: PrivateUserCreate;
 };
 
 export type PrivateCreateUserResponse = (UserPublic);
+
+export type ProcessingExecuteStepData = {
+    id: string;
+    requestBody: ExecuteStepRequest;
+};
+
+export type ProcessingExecuteStepResponse = ({
+    [key: string]: (string);
+});
+
+export type ProcessingStopStepData = {
+    id: string;
+};
+
+export type ProcessingStopStepResponse = ({
+    [key: string]: (string);
+});
+
+export type ProcessingProgressStreamData = {
+    id: string;
+    offset?: number;
+};
+
+export type ProcessingProgressStreamResponse = (unknown);
+
+export type ProcessingListOutputsData = {
+    id: string;
+};
+
+export type ProcessingListOutputsResponse = ({
+    [key: string]: unknown;
+});
+
+export type ProcessingSavePlotMarkingData = {
+    id: string;
+    requestBody: PlotMarkingRequest;
+};
+
+export type ProcessingSavePlotMarkingResponse = ({
+    [key: string]: unknown;
+});
+
+export type ProcessingListImagesData = {
+    extensions?: string;
+    id: string;
+};
+
+export type ProcessingListImagesResponse = ({
+    [key: string]: unknown;
+});
+
+export type ProcessingApplyBoundariesData = {
+    id: string;
+};
+
+export type ProcessingApplyBoundariesResponse = ({
+    [key: string]: unknown;
+});
+
+export type ProcessingSaveGcpSelectionData = {
+    id: string;
+    requestBody: GcpSelectionRequest;
+};
+
+export type ProcessingSaveGcpSelectionResponse = ({
+    [key: string]: unknown;
+});
+
+export type ProcessingGcpCandidatesData = {
+    id: string;
+};
+
+export type ProcessingGcpCandidatesResponse = ({
+    [key: string]: unknown;
+});
+
+export type ProcessingSaveGcpLocationsData = {
+    id: string;
+    requestBody: SaveGcpLocationsRequest;
+};
+
+export type ProcessingSaveGcpLocationsResponse = ({
+    [key: string]: unknown;
+});
+
+export type ProcessingSavePlotBoundariesData = {
+    id: string;
+    requestBody: PlotBoundariesRequest;
+};
+
+export type ProcessingSavePlotBoundariesResponse = ({
+    [key: string]: unknown;
+});
+
+export type ProcessingOrthomosaicInfoData = {
+    id: string;
+};
+
+export type ProcessingOrthomosaicInfoResponse = ({
+    [key: string]: unknown;
+});
+
+export type ProcessingInferenceResultsData = {
+    id: string;
+    model?: (string | null);
+};
+
+export type ProcessingInferenceResultsResponse = ({
+    [key: string]: unknown;
+});
+
+export type ProcessingDownloadCropsData = {
+    id: string;
+};
+
+export type ProcessingDownloadCropsResponse = (unknown);
 
 export type SettingsReadDataRootResponse = (AppSettingPublic);
 
@@ -342,3 +728,39 @@ export type UtilsTestEmailData = {
 export type UtilsTestEmailResponse = (Message);
 
 export type UtilsHealthCheckResponse = (boolean);
+
+export type UtilsDockerCheckResponse = ({
+    [key: string]: unknown;
+});
+
+export type WorkspacesCreateData = {
+    requestBody: WorkspaceCreate;
+};
+
+export type WorkspacesCreateResponse = (WorkspacePublic);
+
+export type WorkspacesReadAllData = {
+    limit?: number;
+    skip?: number;
+};
+
+export type WorkspacesReadAllResponse = (WorkspacesPublic);
+
+export type WorkspacesReadOneData = {
+    id: string;
+};
+
+export type WorkspacesReadOneResponse = (WorkspacePublic);
+
+export type WorkspacesUpdateData = {
+    id: string;
+    requestBody: WorkspaceUpdate;
+};
+
+export type WorkspacesUpdateResponse = (WorkspacePublic);
+
+export type WorkspacesDeleteData = {
+    id: string;
+};
+
+export type WorkspacesDeleteResponse = (Message);

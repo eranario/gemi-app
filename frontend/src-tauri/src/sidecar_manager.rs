@@ -1,4 +1,4 @@
-use std::process::Command;
+use std::net::TcpListener;
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
@@ -7,93 +7,69 @@ use tauri_plugin_shell::ShellExt;
 
 pub struct SidecarManager {
     process: Mutex<Option<CommandChild>>,
-    port: u16,
+    port: Mutex<u16>,
 }
 
 impl SidecarManager {
-    pub fn new(port: u16) -> Self {
+    pub fn new() -> Self {
         SidecarManager {
             process: Mutex::new(None),
-            port,
+            port: Mutex::new(0),
         }
     }
 
-    /// Kill any existing process using the port
-    fn kill_existing_process(&self) {
-        println!("Checking for existing process on port {}...", self.port);
-
-        #[cfg(unix)]
-        {
-            // Use fuser to kill process on the port (Linux/macOS)
-            let _ = Command::new("fuser")
-                .args(["-k", &format!("{}/tcp", self.port)])
-                .output();
-        }
-
-        #[cfg(windows)]
-        {
-            // Windows: find and kill process using netstat and taskkill
-            if let Ok(output) = Command::new("netstat")
-                .args(["-ano", "-p", "TCP"])
-                .output()
-            {
-                let output_str = String::from_utf8_lossy(&output.stdout);
-                for line in output_str.lines() {
-                    if line.contains(&format!(":{}", self.port)) && line.contains("LISTENING") {
-                        if let Some(pid) = line.split_whitespace().last() {
-                            let _ = Command::new("taskkill")
-                                .args(["/F", "/PID", pid])
-                                .output();
-                        }
-                    }
-                }
-            }
-        }
-
-        // Give it a moment to release the port
-        thread::sleep(Duration::from_millis(500));
+    /// Find a free TCP port by asking the OS to bind on port 0.
+    fn find_free_port() -> u16 {
+        TcpListener::bind("127.0.0.1:0")
+            .expect("Failed to bind to a free port")
+            .local_addr()
+            .expect("Failed to get local address")
+            .port()
     }
 
-    /// Start the backend sidecar using Tauri's shell plugin
-    pub fn start(&self, app: &tauri::AppHandle) -> Result<(), String> {
+    /// Return the port the backend was started on (0 if not started yet).
+    pub fn port(&self) -> u16 {
+        *self.port.lock().unwrap()
+    }
+
+    /// Start the backend sidecar on a free port.
+    pub fn start(&self, app: &tauri::AppHandle) -> Result<u16, String> {
         let mut process_guard = self.process.lock().unwrap();
 
         if process_guard.is_some() {
-            return Ok(()); // Already running
+            return Ok(*self.port.lock().unwrap());
         }
 
-        // Kill any existing process on the port
-        self.kill_existing_process();
+        let port = Self::find_free_port();
+        *self.port.lock().unwrap() = port;
 
-        println!("Starting backend sidecar...");
+        println!("Starting backend sidecar on port {}...", port);
 
         let sidecar = app
             .shell()
             .sidecar("gemi-backend")
-            .map_err(|e| format!("Failed to create sidecar command: {}", e))?;
+            .map_err(|e| format!("Failed to create sidecar command: {}", e))?
+            .env("GEMI_BACKEND_PORT", port.to_string());
 
         let (mut rx, child) = sidecar
             .spawn()
             .map_err(|e| format!("Failed to spawn sidecar: {}", e))?;
 
-        // Spawn a thread to handle sidecar output
         tauri::async_runtime::spawn(async move {
             use tauri_plugin_shell::process::CommandEvent;
             while let Some(event) = rx.recv().await {
                 match event {
                     CommandEvent::Stdout(line) => {
-                        let line_str = String::from_utf8_lossy(&line);
-                        println!("[backend] {}", line_str);
+                        println!("[backend] {}", String::from_utf8_lossy(&line));
                     }
                     CommandEvent::Stderr(line) => {
-                        let line_str = String::from_utf8_lossy(&line);
-                        eprintln!("[backend] {}", line_str);
+                        eprintln!("[backend] {}", String::from_utf8_lossy(&line));
                     }
                     CommandEvent::Error(err) => {
                         eprintln!("[backend error] {}", err);
                     }
                     CommandEvent::Terminated(status) => {
-                        println!("[backend] Process terminated with status: {:?}", status);
+                        println!("[backend] Process terminated: {:?}", status);
                         break;
                     }
                     _ => {}
@@ -102,67 +78,38 @@ impl SidecarManager {
         });
 
         *process_guard = Some(child);
-        println!("Backend sidecar started");
-
-        Ok(())
+        println!("Backend sidecar started on port {}", port);
+        Ok(port)
     }
 
-    /// Wait for the backend to be healthy
+    /// Wait for the backend to respond to health checks.
     pub fn wait_for_health(&self, max_retries: u32) -> Result<(), String> {
-        let url = format!("http://127.0.0.1:{}/api/v1/utils/health-check/", self.port);
+        let port = *self.port.lock().unwrap();
+        let url = format!("http://127.0.0.1:{}/api/v1/utils/health-check/", port);
 
-        println!("Waiting for backend to be healthy...");
+        println!("Waiting for backend on port {}...", port);
 
         for i in 0..max_retries {
             thread::sleep(Duration::from_secs(1));
-
             match reqwest::blocking::get(&url) {
-                Ok(response) if response.status().is_success() => {
-                    println!("Backend is healthy!");
+                Ok(r) if r.status().is_success() => {
+                    println!("Backend is healthy on port {}", port);
                     return Ok(());
                 }
-                Ok(response) => {
-                    println!(
-                        "Backend returned {}, retrying... ({}/{})",
-                        response.status(),
-                        i + 1,
-                        max_retries
-                    );
-                }
-                Err(_) => {
-                    println!("Backend not ready, retrying... ({}/{})", i + 1, max_retries);
-                }
+                _ => println!("Not ready yet ({}/{})", i + 1, max_retries),
             }
         }
 
-        Err("Backend failed to become healthy".to_string())
+        Err(format!("Backend on port {} failed to become healthy", port))
     }
 
-    /// Stop the backend sidecar
+    /// Stop the backend sidecar.
     pub fn stop(&self) -> Result<(), String> {
         let mut process_guard = self.process.lock().unwrap();
-
         if let Some(child) = process_guard.take() {
             println!("Stopping backend sidecar...");
-
-            child
-                .kill()
-                .map_err(|e| format!("Failed to kill sidecar: {}", e))?;
-
-            println!("Backend sidecar stopped");
+            child.kill().map_err(|e| format!("Failed to kill sidecar: {}", e))?;
         }
-
         Ok(())
-    }
-
-    /// Get backend status
-    pub fn status(&self) -> Result<String, String> {
-        let url = format!("http://127.0.0.1:{}/api/v1/utils/health-check/", self.port);
-
-        match reqwest::blocking::get(&url) {
-            Ok(response) if response.status().is_success() => Ok("healthy".to_string()),
-            Ok(response) => Ok(format!("unhealthy: {}", response.status())),
-            Err(e) => Ok(format!("unreachable: {}", e)),
-        }
     }
 }

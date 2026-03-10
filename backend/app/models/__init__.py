@@ -43,3 +43,15 @@ from app.models.user import (
     UserUpdateMe,
 )
 from app.models.workspace import Workspace, WorkspaceCreate, WorkspaceUpdate
+from app.models.pipeline import (
+    Pipeline,
+    PipelineCreate,
+    PipelinePublic,
+    PipelinesPublic,
+    PipelineRun,
+    PipelineRunCreate,
+    PipelineRunPublic,
+    PipelineRunsPublic,
+    PipelineRunUpdate,
+    PipelineUpdate,
+)

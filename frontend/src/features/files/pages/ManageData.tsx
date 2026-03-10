@@ -111,7 +111,7 @@ function SyncButton() {
   const { showSuccessToast } = useCustomToast()
 
   const mutation = useMutation({
-    mutationFn: () => FilesService.syncFiles(),
+    mutationFn: () => FilesService.syncFiles() as Promise<{ synced: number; removed: number }>,
     onSuccess: (data: { synced: number; removed: number }) => {
       showSuccessToast(
         `Sync complete: ${data.synced} updated, ${data.removed} removed`,

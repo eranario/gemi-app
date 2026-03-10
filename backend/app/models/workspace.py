@@ -6,6 +6,7 @@ from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
     from app.models.user import User
+    from app.models.pipeline import Pipeline
 
 
 # Shared properties
@@ -34,6 +35,9 @@ class Workspace(WorkspaceBase, table=True):
         foreign_key="user.id", nullable=False, ondelete="CASCADE"
     )
     owner: "User" = Relationship(back_populates="workspaces")
+    pipelines: list["Pipeline"] = Relationship(
+        back_populates="workspace", cascade_delete=True
+    )
 
     # Timestamps
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())

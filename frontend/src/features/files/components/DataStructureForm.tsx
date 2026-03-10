@@ -33,7 +33,7 @@ export function DataStructureForm({
       values.sensor,
     ],
     queryFn: () =>
-      FilesService.getFieldValues({
+      FilesService.readFieldValues({
         dataType: fileType ?? undefined,
         experiment: values.experiment || undefined,
         location: values.location || undefined,

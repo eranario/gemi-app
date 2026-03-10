@@ -13,10 +13,11 @@ from app.main import app
 
 
 def main():
+    port = int(os.environ.get("GEMI_BACKEND_PORT", "8000"))
     uvicorn.run(
         app,
         host="127.0.0.1",
-        port=8000,
+        port=port,
         log_level="info",
     )
 

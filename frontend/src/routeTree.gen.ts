@@ -24,6 +24,7 @@ import { Route as LayoutFilesUpload_dataRouteImport } from './routes/_layout/fil
 import { Route as LayoutFilesManage_dataRouteImport } from './routes/_layout/files/manage_data'
 import { Route as LayoutProcessWorkspaceIdIndexRouteImport } from './routes/_layout/process/$workspaceId/index'
 import { Route as LayoutProcessWorkspaceIdPipelineRouteImport } from './routes/_layout/process/$workspaceId/pipeline'
+import { Route as LayoutProcessWorkspaceIdRunRunIdRouteImport } from './routes/_layout/process/$workspaceId/run/$runId'
 
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
@@ -102,6 +103,12 @@ const LayoutProcessWorkspaceIdPipelineRoute =
     path: '/pipeline',
     getParentRoute: () => LayoutProcessWorkspaceIdRoute,
   } as any)
+const LayoutProcessWorkspaceIdRunRunIdRoute =
+  LayoutProcessWorkspaceIdRunRunIdRouteImport.update({
+    id: '/run/$runId',
+    path: '/run/$runId',
+    getParentRoute: () => LayoutProcessWorkspaceIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
@@ -118,6 +125,7 @@ export interface FileRoutesByFullPath {
   '/process': typeof LayoutProcessIndexRoute
   '/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
   '/process/$workspaceId/': typeof LayoutProcessWorkspaceIdIndexRoute
+  '/process/$workspaceId/run/$runId': typeof LayoutProcessWorkspaceIdRunRunIdRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
@@ -133,6 +141,7 @@ export interface FileRoutesByTo {
   '/process': typeof LayoutProcessIndexRoute
   '/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
   '/process/$workspaceId': typeof LayoutProcessWorkspaceIdIndexRoute
+  '/process/$workspaceId/run/$runId': typeof LayoutProcessWorkspaceIdRunRunIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -151,6 +160,7 @@ export interface FileRoutesById {
   '/_layout/process/': typeof LayoutProcessIndexRoute
   '/_layout/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
   '/_layout/process/$workspaceId/': typeof LayoutProcessWorkspaceIdIndexRoute
+  '/_layout/process/$workspaceId/run/$runId': typeof LayoutProcessWorkspaceIdRunRunIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -169,6 +179,7 @@ export interface FileRouteTypes {
     | '/process'
     | '/process/$workspaceId/pipeline'
     | '/process/$workspaceId/'
+    | '/process/$workspaceId/run/$runId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
@@ -184,6 +195,7 @@ export interface FileRouteTypes {
     | '/process'
     | '/process/$workspaceId/pipeline'
     | '/process/$workspaceId'
+    | '/process/$workspaceId/run/$runId'
   id:
     | '__root__'
     | '/_layout'
@@ -201,6 +213,7 @@ export interface FileRouteTypes {
     | '/_layout/process/'
     | '/_layout/process/$workspaceId/pipeline'
     | '/_layout/process/$workspaceId/'
+    | '/_layout/process/$workspaceId/run/$runId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -318,12 +331,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutProcessWorkspaceIdPipelineRouteImport
       parentRoute: typeof LayoutProcessWorkspaceIdRoute
     }
+    '/_layout/process/$workspaceId/run/$runId': {
+      id: '/_layout/process/$workspaceId/run/$runId'
+      path: '/run/$runId'
+      fullPath: '/process/$workspaceId/run/$runId'
+      preLoaderRoute: typeof LayoutProcessWorkspaceIdRunRunIdRouteImport
+      parentRoute: typeof LayoutProcessWorkspaceIdRoute
+    }
   }
 }
 
 interface LayoutProcessWorkspaceIdRouteChildren {
   LayoutProcessWorkspaceIdPipelineRoute: typeof LayoutProcessWorkspaceIdPipelineRoute
   LayoutProcessWorkspaceIdIndexRoute: typeof LayoutProcessWorkspaceIdIndexRoute
+  LayoutProcessWorkspaceIdRunRunIdRoute: typeof LayoutProcessWorkspaceIdRunRunIdRoute
 }
 
 const LayoutProcessWorkspaceIdRouteChildren: LayoutProcessWorkspaceIdRouteChildren =
@@ -331,6 +352,8 @@ const LayoutProcessWorkspaceIdRouteChildren: LayoutProcessWorkspaceIdRouteChildr
     LayoutProcessWorkspaceIdPipelineRoute:
       LayoutProcessWorkspaceIdPipelineRoute,
     LayoutProcessWorkspaceIdIndexRoute: LayoutProcessWorkspaceIdIndexRoute,
+    LayoutProcessWorkspaceIdRunRunIdRoute:
+      LayoutProcessWorkspaceIdRunRunIdRoute,
   }
 
 const LayoutProcessWorkspaceIdRouteWithChildren =

@@ -23,6 +23,14 @@ dependencies = [
     "pyjwt<3.0.0,>=2.8.0",
     "pyinstaller>=6.18.0",
     "pillow>=12.1.1",
+    "rasterio>=1.4.4",
+    "pyproj>=3.7.1",
+    "geopandas>=1.1.2",
+    "opencv-python-headless>=4.13.0.92",
+    "scipy>=1.15.3",
+    "numpy>=2.2.6",
+    "pandas>=2.3.3",
+    "inference-sdk>=0.9",
 ]
 
 [tool.uv]

@@ -18,7 +18,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { LoadingButton } from "@/components/ui/loading-button"
 import { PasswordInput } from "@/components/ui/password-input"
-import useAuth, { isLoggedIn } from "@/hooks/useAuth"
+import { isLoggedIn } from "@/hooks/useAuth"
 
 const formSchema = z
   .object({
@@ -58,7 +58,7 @@ export const Route = createFileRoute("/signup")({
 })
 
 function SignUp() {
-  const { signUpMutation } = useAuth()
+  const isPending = false
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     mode: "onBlur",
@@ -71,13 +71,7 @@ function SignUp() {
     },
   })
 
-  const onSubmit = (data: FormData) => {
-    if (signUpMutation.isPending) return
-
-    // exclude confirm_password from submission data
-    const { confirm_password: _confirm_password, ...submitData } = data
-    signUpMutation.mutate(submitData)
-  }
+  const onSubmit = (_data: FormData) => {}
 
   return (
     <AuthLayout>
@@ -168,7 +162,7 @@ function SignUp() {
             <LoadingButton
               type="submit"
               className="w-full"
-              loading={signUpMutation.isPending}
+              loading={isPending}
             >
               Sign Up
             </LoadingButton>

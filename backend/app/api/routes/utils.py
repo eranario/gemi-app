@@ -1,3 +1,5 @@
+import shutil
+
 from fastapi import APIRouter, Depends
 from pydantic.networks import EmailStr
 
@@ -29,3 +31,10 @@ def test_email(email_to: EmailStr) -> Message:
 @router.get("/health-check/")
 async def health_check() -> bool:
     return True
+
+
+@router.get("/docker-check/")
+async def docker_check() -> dict:
+    """Return whether Docker is available on the host system."""
+    available = shutil.which("docker") is not None
+    return {"available": available}

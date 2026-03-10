@@ -3,9 +3,34 @@
 import type { CancelablePromise } from './core/CancelablePromise';
 import { OpenAPI } from './core/OpenAPI';
 import { request as __request } from './core/request';
-import type { FilesCreateFileData, FilesCreateFileResponse, FilesReadFilesData, FilesReadFilesResponse, FilesReadFileData, FilesReadFileResponse, FilesUpdateFileData, FilesUpdateFileResponse, FilesDeleteFileData, FilesDeleteFileResponse, FilesCopyLocalFilesData, FilesCopyLocalFilesResponse, ItemsReadItemsData, ItemsReadItemsResponse, ItemsCreateItemData, ItemsCreateItemResponse, ItemsReadItemData, ItemsReadItemResponse, ItemsUpdateItemData, ItemsUpdateItemResponse, ItemsDeleteItemData, ItemsDeleteItemResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, PrivateCreateUserData, PrivateCreateUserResponse, SettingsReadDataRootResponse, SettingsUpdateDataRootData, SettingsUpdateDataRootResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse } from './types.gen';
+import type { FilesServeFileData, FilesServeFileResponse, FilesCreateFileData, FilesCreateFileResponse, FilesReadFilesData, FilesReadFilesResponse, FilesReadFieldValuesData, FilesReadFieldValuesResponse, FilesReadFileData, FilesReadFileResponse, FilesUpdateFileData, FilesUpdateFileResponse, FilesDeleteFileData, FilesDeleteFileResponse, FilesSyncFilesResponse, FilesExtractMetadataData, FilesExtractMetadataResponse, FilesCopyLocalFilesData, FilesCopyLocalFilesResponse, FilesCopyLocalFilesStreamData, FilesCopyLocalFilesStreamResponse, ItemsReadItemsData, ItemsReadItemsResponse, ItemsCreateItemData, ItemsCreateItemResponse, ItemsReadItemData, ItemsReadItemResponse, ItemsUpdateItemData, ItemsUpdateItemResponse, ItemsDeleteItemData, ItemsDeleteItemResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, PipelinesCreateData, PipelinesCreateResponse, PipelinesReadAllData, PipelinesReadAllResponse, PipelinesReadOneData, PipelinesReadOneResponse, PipelinesUpdateData, PipelinesUpdateResponse, PipelinesDeleteData, PipelinesDeleteResponse, PipelinesCreateRunData, PipelinesCreateRunResponse, PipelinesReadRunsData, PipelinesReadRunsResponse, PipelinesReadRunData, PipelinesReadRunResponse, PipelinesUpdateRunData, PipelinesUpdateRunResponse, PipelinesDeleteRunData, PipelinesDeleteRunResponse, PrivateCreateUserData, PrivateCreateUserResponse, ProcessingExecuteStepData, ProcessingExecuteStepResponse, ProcessingStopStepData, ProcessingStopStepResponse, ProcessingProgressStreamData, ProcessingProgressStreamResponse, ProcessingListOutputsData, ProcessingListOutputsResponse, ProcessingSavePlotMarkingData, ProcessingSavePlotMarkingResponse, ProcessingListImagesData, ProcessingListImagesResponse, ProcessingApplyBoundariesData, ProcessingApplyBoundariesResponse, ProcessingSaveGcpSelectionData, ProcessingSaveGcpSelectionResponse, ProcessingGcpCandidatesData, ProcessingGcpCandidatesResponse, ProcessingSaveGcpLocationsData, ProcessingSaveGcpLocationsResponse, ProcessingSavePlotBoundariesData, ProcessingSavePlotBoundariesResponse, ProcessingOrthomosaicInfoData, ProcessingOrthomosaicInfoResponse, ProcessingInferenceResultsData, ProcessingInferenceResultsResponse, ProcessingDownloadCropsData, ProcessingDownloadCropsResponse, SettingsReadDataRootResponse, SettingsUpdateDataRootData, SettingsUpdateDataRootResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse, UtilsDockerCheckResponse, WorkspacesCreateData, WorkspacesCreateResponse, WorkspacesReadAllData, WorkspacesReadAllResponse, WorkspacesReadOneData, WorkspacesReadOneResponse, WorkspacesUpdateData, WorkspacesUpdateResponse, WorkspacesDeleteData, WorkspacesDeleteResponse } from './types.gen';
 
 export class FilesService {
+    /**
+     * Serve File
+     * Serve a single file (image) directly from the local filesystem.
+     *
+     * Only files under the configured data_root and with image extensions are
+     * allowed.  This endpoint is used by the Plot Marker and GCP Picker tools
+     * to display raw images without copying them to the frontend.
+     * @param data The data for the request.
+     * @param data.path Absolute path to the file on disk
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static serveFile(data: FilesServeFileData): CancelablePromise<FilesServeFileResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/files/serve',
+            query: {
+                path: data.path
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
     /**
      * Create File
      * @param data The data for the request.
@@ -40,6 +65,36 @@ export class FilesService {
             query: {
                 skip: data.skip,
                 limit: data.limit
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Read Field Values
+     * @param data The data for the request.
+     * @param data.dataType
+     * @param data.experiment
+     * @param data.location
+     * @param data.population
+     * @param data.platform
+     * @param data.sensor
+     * @returns string Successful Response
+     * @throws ApiError
+     */
+    public static readFieldValues(data: FilesReadFieldValuesData = {}): CancelablePromise<FilesReadFieldValuesResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/files/field-values',
+            query: {
+                data_type: data.dataType,
+                experiment: data.experiment,
+                location: data.location,
+                population: data.population,
+                platform: data.platform,
+                sensor: data.sensor
             },
             errors: {
                 422: 'Validation Error'
@@ -112,66 +167,35 @@ export class FilesService {
     
     /**
      * Sync Files
-     * Reconcile DB records with files on disk.
      * @returns unknown Successful Response
      * @throws ApiError
      */
-    public static syncFiles(): CancelablePromise<{ synced: number; removed: number }> {
+    public static syncFiles(): CancelablePromise<FilesSyncFilesResponse> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/files/sync'
         });
     }
-
+    
     /**
      * Extract Metadata
-     * Read EXIF metadata from a local file.
      * @param data The data for the request.
-     * @param data.filePath Local file path to read EXIF from
-     * @returns object with date, platform, sensor (nullable)
+     * @param data.requestBody
+     * @returns unknown Successful Response
      * @throws ApiError
      */
-    public static extractMetadata(data: { filePath: string }): CancelablePromise<{ date: string | null; platform: string | null; sensor: string | null }> {
+    public static extractMetadata(data: FilesExtractMetadataData): CancelablePromise<FilesExtractMetadataResponse> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/files/extract-metadata',
-            body: { file_path: data.filePath },
+            body: data.requestBody,
             mediaType: 'application/json',
             errors: {
                 422: 'Validation Error'
             }
         });
     }
-
-    /**
-     * Get Field Values
-     * Returns distinct non-empty values for autocomplete suggestions, with cascading filters.
-     * @param data Optional filter params (data_type, experiment, location, population, platform, sensor)
-     * @returns Record of field name to string array
-     * @throws ApiError
-     */
-    public static getFieldValues(data: {
-        dataType?: string;
-        experiment?: string;
-        location?: string;
-        population?: string;
-        platform?: string;
-        sensor?: string;
-    } = {}): CancelablePromise<Record<string, string[]>> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/v1/files/field-values',
-            query: {
-                data_type: data.dataType,
-                experiment: data.experiment,
-                location: data.location,
-                population: data.population,
-                platform: data.platform,
-                sensor: data.sensor
-            }
-        });
-    }
-
+    
     /**
      * Copy Local Files
      * @param data The data for the request.
@@ -183,6 +207,25 @@ export class FilesService {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/files/copy-local',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Copy Local Files Stream
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static copyLocalFilesStream(data: FilesCopyLocalFilesStreamData): CancelablePromise<FilesCopyLocalFilesStreamResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/files/copy-local-stream',
             body: data.requestBody,
             mediaType: 'application/json',
             errors: {
@@ -400,6 +443,232 @@ export class LoginService {
     }
 }
 
+export class PipelinesService {
+    /**
+     * Create
+     * @param data The data for the request.
+     * @param data.workspaceId
+     * @param data.requestBody
+     * @returns PipelinePublic Successful Response
+     * @throws ApiError
+     */
+    public static create(data: PipelinesCreateData): CancelablePromise<PipelinesCreateResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/workspaces/{workspace_id}/pipelines',
+            path: {
+                workspace_id: data.workspaceId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Read All
+     * @param data The data for the request.
+     * @param data.workspaceId
+     * @param data.skip
+     * @param data.limit
+     * @returns PipelinesPublic Successful Response
+     * @throws ApiError
+     */
+    public static readAll(data: PipelinesReadAllData): CancelablePromise<PipelinesReadAllResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/workspaces/{workspace_id}/pipelines',
+            path: {
+                workspace_id: data.workspaceId
+            },
+            query: {
+                skip: data.skip,
+                limit: data.limit
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Read One
+     * @param data The data for the request.
+     * @param data.id
+     * @returns PipelinePublic Successful Response
+     * @throws ApiError
+     */
+    public static readOne(data: PipelinesReadOneData): CancelablePromise<PipelinesReadOneResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipelines/{id}',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Update
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.requestBody
+     * @returns PipelinePublic Successful Response
+     * @throws ApiError
+     */
+    public static update(data: PipelinesUpdateData): CancelablePromise<PipelinesUpdateResponse> {
+        return __request(OpenAPI, {
+            method: 'PUT',
+            url: '/api/v1/pipelines/{id}',
+            path: {
+                id: data.id
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Delete
+     * @param data The data for the request.
+     * @param data.id
+     * @returns Message Successful Response
+     * @throws ApiError
+     */
+    public static delete(data: PipelinesDeleteData): CancelablePromise<PipelinesDeleteResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/pipelines/{id}',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Create Run
+     * @param data The data for the request.
+     * @param data.pipelineId
+     * @param data.requestBody
+     * @returns PipelineRunPublic Successful Response
+     * @throws ApiError
+     */
+    public static createRun(data: PipelinesCreateRunData): CancelablePromise<PipelinesCreateRunResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/pipelines/{pipeline_id}/runs',
+            path: {
+                pipeline_id: data.pipelineId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Read Runs
+     * @param data The data for the request.
+     * @param data.pipelineId
+     * @param data.skip
+     * @param data.limit
+     * @returns PipelineRunsPublic Successful Response
+     * @throws ApiError
+     */
+    public static readRuns(data: PipelinesReadRunsData): CancelablePromise<PipelinesReadRunsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipelines/{pipeline_id}/runs',
+            path: {
+                pipeline_id: data.pipelineId
+            },
+            query: {
+                skip: data.skip,
+                limit: data.limit
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Read Run
+     * @param data The data for the request.
+     * @param data.id
+     * @returns PipelineRunPublic Successful Response
+     * @throws ApiError
+     */
+    public static readRun(data: PipelinesReadRunData): CancelablePromise<PipelinesReadRunResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Update Run
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.requestBody
+     * @returns PipelineRunPublic Successful Response
+     * @throws ApiError
+     */
+    public static updateRun(data: PipelinesUpdateRunData): CancelablePromise<PipelinesUpdateRunResponse> {
+        return __request(OpenAPI, {
+            method: 'PUT',
+            url: '/api/v1/pipeline-runs/{id}',
+            path: {
+                id: data.id
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Delete Run
+     * @param data The data for the request.
+     * @param data.id
+     * @returns Message Successful Response
+     * @throws ApiError
+     */
+    public static deleteRun(data: PipelinesDeleteRunData): CancelablePromise<PipelinesDeleteRunResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/pipeline-runs/{id}',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+}
+
 export class PrivateService {
     /**
      * Create User
@@ -415,6 +684,354 @@ export class PrivateService {
             url: '/api/v1/private/users/',
             body: data.requestBody,
             mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+}
+
+export class ProcessingService {
+    /**
+     * Execute Step
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.requestBody
+     * @returns string Successful Response
+     * @throws ApiError
+     */
+    public static executeStep(data: ProcessingExecuteStepData): CancelablePromise<ProcessingExecuteStepResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/pipeline-runs/{id}/execute-step',
+            path: {
+                id: data.id
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Stop Step
+     * @param data The data for the request.
+     * @param data.id
+     * @returns string Successful Response
+     * @throws ApiError
+     */
+    public static stopStep(data: ProcessingStopStepData): CancelablePromise<ProcessingStopStepResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/pipeline-runs/{id}/stop',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Progress Stream
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.offset
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static progressStream(data: ProcessingProgressStreamData): CancelablePromise<ProcessingProgressStreamResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/progress',
+            path: {
+                id: data.id
+            },
+            query: {
+                offset: data.offset
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * List Outputs
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static listOutputs(data: ProcessingListOutputsData): CancelablePromise<ProcessingListOutputsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/outputs',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Save Plot Marking
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.requestBody
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static savePlotMarking(data: ProcessingSavePlotMarkingData): CancelablePromise<ProcessingSavePlotMarkingResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/pipeline-runs/{id}/plot-marking',
+            path: {
+                id: data.id
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * List Images
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.extensions
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static listImages(data: ProcessingListImagesData): CancelablePromise<ProcessingListImagesResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/images',
+            path: {
+                id: data.id
+            },
+            query: {
+                extensions: data.extensions
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Apply Boundaries
+     * Mark the boundary step as complete on a new run using pipeline-level files.
+     *
+     * Ground: copies plot_borders.csv  → marks plot_marking complete.
+     * Aerial: copies Plot-Boundary-WGS84.geojson → marks plot_boundaries complete.
+     *
+     * Returns 404 if no saved boundaries exist yet for this pipeline.
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static applyBoundaries(data: ProcessingApplyBoundariesData): CancelablePromise<ProcessingApplyBoundariesResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/pipeline-runs/{id}/apply-boundaries',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Save Gcp Selection
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.requestBody
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static saveGcpSelection(data: ProcessingSaveGcpSelectionData): CancelablePromise<ProcessingSaveGcpSelectionResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/pipeline-runs/{id}/gcp-selection',
+            path: {
+                id: data.id
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Gcp Candidates
+     * Return:
+     * - gcps: parsed list from gcp_locations.csv (label, lat, lon, alt)
+     * - images: all drone images with their EXIF GPS coordinates
+     * - has_gcp_locations: whether the CSV is available
+     * - raw_dir: absolute path to the raw image directory (for /files/serve)
+     *
+     * The frontend uses image GPS to sort candidates by proximity to each GCP
+     * and to build geo.txt when saving.
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static gcpCandidates(data: ProcessingGcpCandidatesData): CancelablePromise<ProcessingGcpCandidatesResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/gcp-candidates',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Save Gcp Locations
+     * Save gcp_locations.csv inline (without going to the Files tab).
+     * Stored in Intermediate/{workspace}/{pop}/ and returned as parsed GCPs
+     * so the frontend can immediately render the picker.
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.requestBody
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static saveGcpLocations(data: ProcessingSaveGcpLocationsData): CancelablePromise<ProcessingSaveGcpLocationsResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/pipeline-runs/{id}/save-gcp-locations',
+            path: {
+                id: data.id
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Save Plot Boundaries
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.requestBody
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static savePlotBoundaries(data: ProcessingSavePlotBoundariesData): CancelablePromise<ProcessingSavePlotBoundariesResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/pipeline-runs/{id}/plot-boundaries',
+            path: {
+                id: data.id
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Orthomosaic Info
+     * Return the orthomosaic path and WGS84 bounding box so the frontend can
+     * render it as a Leaflet ImageOverlay and let the user draw plot polygons.
+     *
+     * Returns:
+     * {
+     * "available": bool,
+     * "path": str | None,        # absolute path for /files/serve
+     * "bounds": [[s, w], [n, e]] | None,  # Leaflet LatLngBounds format
+     * "existing_geojson": {...} | None,   # if Plot-Boundary-WGS84.geojson exists
+     * }
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static orthomosaicInfo(data: ProcessingOrthomosaicInfoData): CancelablePromise<ProcessingOrthomosaicInfoResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/orthomosaic-info',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Inference Results
+     * Return parsed predictions CSV + image list for the inference viewer.
+     *
+     * `model` query param selects which model's results to return (defaults to first).
+     *
+     * Response:
+     * {
+     * "available": bool,
+     * "models": ["ModelA", "ModelB"],   # all available model labels
+     * "active_model": "ModelA",
+     * "predictions": [...],
+     * "images": [{"name": str, "path": str}, ...]
+     * }
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.model
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static inferenceResults(data: ProcessingInferenceResultsData): CancelablePromise<ProcessingInferenceResultsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/inference-results',
+            path: {
+                id: data.id
+            },
+            query: {
+                model: data.model
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Download Crops
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static downloadCrops(data: ProcessingDownloadCropsData): CancelablePromise<ProcessingDownloadCropsResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/pipeline-runs/{id}/download-crops',
+            path: {
+                id: data.id
+            },
             errors: {
                 422: 'Validation Error'
             }
@@ -683,6 +1300,125 @@ export class UtilsService {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/utils/health-check/'
+        });
+    }
+    
+    /**
+     * Docker Check
+     * Return whether Docker is available on the host system.
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static dockerCheck(): CancelablePromise<UtilsDockerCheckResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/utils/docker-check/'
+        });
+    }
+}
+
+export class WorkspacesService {
+    /**
+     * Create
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns WorkspacePublic Successful Response
+     * @throws ApiError
+     */
+    public static create(data: WorkspacesCreateData): CancelablePromise<WorkspacesCreateResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/workspaces/',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Read All
+     * @param data The data for the request.
+     * @param data.skip
+     * @param data.limit
+     * @returns WorkspacesPublic Successful Response
+     * @throws ApiError
+     */
+    public static readAll(data: WorkspacesReadAllData = {}): CancelablePromise<WorkspacesReadAllResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/workspaces/',
+            query: {
+                skip: data.skip,
+                limit: data.limit
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Read One
+     * @param data The data for the request.
+     * @param data.id
+     * @returns WorkspacePublic Successful Response
+     * @throws ApiError
+     */
+    public static readOne(data: WorkspacesReadOneData): CancelablePromise<WorkspacesReadOneResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/workspaces/{id}',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Update
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.requestBody
+     * @returns WorkspacePublic Successful Response
+     * @throws ApiError
+     */
+    public static update(data: WorkspacesUpdateData): CancelablePromise<WorkspacesUpdateResponse> {
+        return __request(OpenAPI, {
+            method: 'PUT',
+            url: '/api/v1/workspaces/{id}',
+            path: {
+                id: data.id
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Delete
+     * @param data The data for the request.
+     * @param data.id
+     * @returns Message Successful Response
+     * @throws ApiError
+     */
+    public static delete(data: WorkspacesDeleteData): CancelablePromise<WorkspacesDeleteResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/workspaces/{id}',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
         });
     }
 }

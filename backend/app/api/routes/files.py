@@ -1,13 +1,14 @@
 import json
 import logging
+import mimetypes
 import shutil
 import uuid
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from app.api.deps import CurrentUser, SessionDep
@@ -32,6 +33,39 @@ from app.models import (
 
 router = APIRouter(prefix="/files", tags=["files"])
 logger = logging.getLogger(__name__)
+
+# Allowed extensions for the serve endpoint — prevents arbitrary file reads
+_SERVEABLE_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".gif", ".bmp",
+    ".geojson", ".csv",
+}
+
+
+@router.get("/serve")
+def serve_file(
+    current_user: CurrentUser,
+    path: str = Query(..., description="Absolute path to the file on disk"),
+) -> FileResponse:
+    """
+    Serve a single file (image) directly from the local filesystem.
+
+    Only files under the configured data_root and with image extensions are
+    allowed.  This endpoint is used by the Plot Marker and GCP Picker tools
+    to display raw images without copying them to the frontend.
+    """
+    src = Path(path)
+
+    if src.suffix.lower() not in _SERVEABLE_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type '{src.suffix}' is not serveable. Allowed: {_SERVEABLE_EXTENSIONS}",
+        )
+
+    if not src.exists() or not src.is_file():
+        raise HTTPException(status_code=404, detail=f"File not found: {path}")
+
+    media_type = mimetypes.guess_type(str(src))[0] or "application/octet-stream"
+    return FileResponse(path=str(src), media_type=media_type, filename=src.name)
 
 
 # POST /files/ (create new upload record)
@@ -227,6 +261,40 @@ def _sse_event(data: dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
 
 
+def _trigger_bin_extraction(bin_path: Path, output_dir: Path) -> None:
+    """
+    Launch bin → images extraction in a daemon thread after a .bin file is copied.
+    Progress is emitted to the runner store under a key derived from the file path.
+    The frontend can poll /files/extraction-progress?path=... for SSE updates.
+    """
+    import threading
+    import uuid as _uuid
+    from app.processing import runner
+    from app.processing.ground import extract_bin_file
+
+    extraction_id = str(_uuid.uuid4())
+    stop_event = threading.Event()
+
+    def _emit(event: dict) -> None:
+        runner.emit(extraction_id, event)
+
+    def worker() -> None:
+        try:
+            extract_bin_file(
+                bin_path=bin_path,
+                output_dir=output_dir,
+                stop_event=stop_event,
+                emit=_emit,
+            )
+        finally:
+            runner._mark_done(extraction_id)
+
+    runner._init_run(extraction_id)
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    logger.info("Started bin extraction thread for %s (id=%s)", bin_path.name, extraction_id)
+
+
 def _copy_local_stream(
     data_root: str, body: LocalCopyRequest, file_upload_id: uuid.UUID, session: Any
 ) -> Generator[str, None, None]:
@@ -277,6 +345,15 @@ def _copy_local_stream(
                     "index": idx,
                 }
             )
+
+            # Amiga .bin files need extraction after copy
+            if src.suffix.lower() == ".bin":
+                yield _sse_event(
+                    {"event": "extracting", "file": name,
+                     "message": f"Extracting {name}…"}
+                )
+                _trigger_bin_extraction(dest_path, dest_dir)
+
         except Exception as exc:
             yield _sse_event(
                 {"event": "error", "file": name, "message": str(exc), "index": idx}

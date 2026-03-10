@@ -18,8 +18,8 @@ export function UploadData() {
 
       try {
         const meta = await FilesService.extractMetadata({
-          filePath: firstPath,
-        });
+          requestBody: { file_path: firstPath },
+        }) as { date?: string; platform?: string; sensor?: string };
 
         setFormValues((prev) => {
           const next = { ...prev };

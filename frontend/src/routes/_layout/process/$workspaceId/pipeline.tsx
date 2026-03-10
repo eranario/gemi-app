@@ -4,6 +4,7 @@ import { ProcessingPipeline } from "@/features/process/pages/ProcessingPipeline"
 
 type PipelineSearch = {
   type?: "aerial" | "ground"
+  pipelineId?: string
 }
 
 export const Route = createFileRoute(
@@ -13,6 +14,7 @@ export const Route = createFileRoute(
   validateSearch: (search: Record<string, unknown>): PipelineSearch => {
     return {
       type: search.type === "ground" ? "ground" : "aerial",
+      pipelineId: typeof search.pipelineId === "string" ? search.pipelineId : undefined,
     }
   },
   head: () => ({

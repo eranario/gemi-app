@@ -86,6 +86,31 @@ export const Body_login_login_access_tokenSchema = {
     title: 'Body_login-login_access_token'
 } as const;
 
+export const ExecuteStepRequestSchema = {
+    properties: {
+        step: {
+            type: 'string',
+            title: 'Step'
+        },
+        models: {
+            items: {
+                '$ref': '#/components/schemas/ModelConfig'
+            },
+            type: 'array',
+            title: 'Models',
+            default: []
+        },
+        agrowstitch_version: {
+            type: 'integer',
+            title: 'Agrowstitch Version',
+            default: 1
+        }
+    },
+    type: 'object',
+    required: ['step'],
+    title: 'ExecuteStepRequest'
+} as const;
+
 export const FileUploadCreateSchema = {
     properties: {
         data_type: {
@@ -375,6 +400,17 @@ export const FileUploadUpdateSchema = {
             ],
             title: 'Status'
         },
+        file_count: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'File Count'
+        },
         notes: {
             anyOf: [
                 {
@@ -409,6 +445,41 @@ export const FileUploadsPublicSchema = {
     type: 'object',
     required: ['data', 'count'],
     title: 'FileUploadsPublic'
+} as const;
+
+export const GcpSelectionRequestSchema = {
+    properties: {
+        gcp_selections: {
+            items: {
+                additionalProperties: true,
+                type: 'object'
+            },
+            type: 'array',
+            title: 'Gcp Selections'
+        },
+        image_gps: {
+            items: {
+                additionalProperties: true,
+                type: 'object'
+            },
+            type: 'array',
+            title: 'Image Gps'
+        },
+        gcp_locations_csv: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Gcp Locations Csv'
+        }
+    },
+    type: 'object',
+    required: ['gcp_selections', 'image_gps'],
+    title: 'GcpSelectionRequest'
 } as const;
 
 export const HTTPValidationErrorSchema = {
@@ -559,6 +630,72 @@ export const LocalCopyRequestSchema = {
             type: 'boolean',
             title: 'Reupload',
             default: false
+        },
+        experiment: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Experiment'
+        },
+        location: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Location'
+        },
+        population: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Population'
+        },
+        date: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Date'
+        },
+        platform: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Platform'
+        },
+        sensor: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Sensor'
         }
     },
     type: 'object',
@@ -578,6 +715,31 @@ export const MessageSchema = {
     title: 'Message'
 } as const;
 
+export const ModelConfigSchema = {
+    properties: {
+        label: {
+            type: 'string',
+            title: 'Label'
+        },
+        roboflow_api_key: {
+            type: 'string',
+            title: 'Roboflow Api Key'
+        },
+        roboflow_model_id: {
+            type: 'string',
+            title: 'Roboflow Model Id'
+        },
+        task_type: {
+            type: 'string',
+            title: 'Task Type',
+            default: 'detection'
+        }
+    },
+    type: 'object',
+    required: ['label', 'roboflow_api_key', 'roboflow_model_id'],
+    title: 'ModelConfig'
+} as const;
+
 export const NewPasswordSchema = {
     properties: {
         token: {
@@ -594,6 +756,525 @@ export const NewPasswordSchema = {
     type: 'object',
     required: ['token', 'new_password'],
     title: 'NewPassword'
+} as const;
+
+export const PipelineCreateSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Name'
+        },
+        type: {
+            type: 'string',
+            maxLength: 50,
+            title: 'Type'
+        },
+        config: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Config'
+        },
+        workspace_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Workspace Id'
+        }
+    },
+    type: 'object',
+    required: ['name', 'type', 'workspace_id'],
+    title: 'PipelineCreate'
+} as const;
+
+export const PipelinePublicSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Name'
+        },
+        type: {
+            type: 'string',
+            maxLength: 50,
+            title: 'Type'
+        },
+        config: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Config'
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        workspace_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Workspace Id'
+        },
+        created_at: {
+            type: 'string',
+            title: 'Created At'
+        },
+        updated_at: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Updated At'
+        }
+    },
+    type: 'object',
+    required: ['name', 'type', 'id', 'workspace_id', 'created_at', 'updated_at'],
+    title: 'PipelinePublic'
+} as const;
+
+export const PipelineRunCreateSchema = {
+    properties: {
+        date: {
+            type: 'string',
+            maxLength: 50,
+            title: 'Date'
+        },
+        experiment: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Experiment'
+        },
+        location: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Location'
+        },
+        population: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Population'
+        },
+        platform: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Platform'
+        },
+        sensor: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Sensor'
+        },
+        status: {
+            type: 'string',
+            maxLength: 50,
+            title: 'Status',
+            default: 'pending'
+        },
+        current_step: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 100
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Current Step'
+        },
+        steps_completed: {
+            anyOf: [
+                {
+                    additionalProperties: {
+                        type: 'boolean'
+                    },
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Steps Completed'
+        },
+        outputs: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Outputs'
+        },
+        error: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 2000
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error'
+        },
+        pipeline_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Pipeline Id'
+        },
+        file_upload_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'File Upload Id'
+        }
+    },
+    type: 'object',
+    required: ['date', 'experiment', 'location', 'population', 'platform', 'sensor', 'pipeline_id'],
+    title: 'PipelineRunCreate'
+} as const;
+
+export const PipelineRunPublicSchema = {
+    properties: {
+        date: {
+            type: 'string',
+            maxLength: 50,
+            title: 'Date'
+        },
+        experiment: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Experiment'
+        },
+        location: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Location'
+        },
+        population: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Population'
+        },
+        platform: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Platform'
+        },
+        sensor: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Sensor'
+        },
+        status: {
+            type: 'string',
+            maxLength: 50,
+            title: 'Status',
+            default: 'pending'
+        },
+        current_step: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 100
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Current Step'
+        },
+        steps_completed: {
+            anyOf: [
+                {
+                    additionalProperties: {
+                        type: 'boolean'
+                    },
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Steps Completed'
+        },
+        outputs: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Outputs'
+        },
+        error: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 2000
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error'
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        pipeline_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Pipeline Id'
+        },
+        file_upload_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'File Upload Id'
+        },
+        created_at: {
+            type: 'string',
+            title: 'Created At'
+        },
+        completed_at: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Completed At'
+        }
+    },
+    type: 'object',
+    required: ['date', 'experiment', 'location', 'population', 'platform', 'sensor', 'id', 'pipeline_id', 'file_upload_id', 'created_at', 'completed_at'],
+    title: 'PipelineRunPublic'
+} as const;
+
+export const PipelineRunUpdateSchema = {
+    properties: {
+        status: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 50
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Status'
+        },
+        current_step: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Current Step'
+        },
+        steps_completed: {
+            anyOf: [
+                {
+                    additionalProperties: {
+                        type: 'boolean'
+                    },
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Steps Completed'
+        },
+        outputs: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Outputs'
+        },
+        error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error'
+        },
+        completed_at: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Completed At'
+        }
+    },
+    type: 'object',
+    title: 'PipelineRunUpdate'
+} as const;
+
+export const PipelineRunsPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/PipelineRunPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'PipelineRunsPublic'
+} as const;
+
+export const PipelineUpdateSchema = {
+    properties: {
+        name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        },
+        config: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Config'
+        }
+    },
+    type: 'object',
+    title: 'PipelineUpdate'
+} as const;
+
+export const PipelinesPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/PipelinePublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'PipelinesPublic'
+} as const;
+
+export const PlotBoundariesRequestSchema = {
+    properties: {
+        geojson: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Geojson'
+        },
+        version: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Version'
+        }
+    },
+    type: 'object',
+    required: ['geojson'],
+    title: 'PlotBoundariesRequest'
+} as const;
+
+export const PlotMarkingRequestSchema = {
+    properties: {
+        selections: {
+            items: {
+                additionalProperties: true,
+                type: 'object'
+            },
+            type: 'array',
+            title: 'Selections'
+        }
+    },
+    type: 'object',
+    required: ['selections'],
+    title: 'PlotMarkingRequest'
 } as const;
 
 export const PrivateUserCreateSchema = {
@@ -619,6 +1300,18 @@ export const PrivateUserCreateSchema = {
     type: 'object',
     required: ['email', 'password', 'full_name'],
     title: 'PrivateUserCreate'
+} as const;
+
+export const SaveGcpLocationsRequestSchema = {
+    properties: {
+        csv_text: {
+            type: 'string',
+            title: 'Csv Text'
+        }
+    },
+    type: 'object',
+    required: ['csv_text'],
+    title: 'SaveGcpLocationsRequest'
 } as const;
 
 export const TokenSchema = {
@@ -907,4 +1600,118 @@ export const ValidationErrorSchema = {
     type: 'object',
     required: ['loc', 'msg', 'type'],
     title: 'ValidationError'
+} as const;
+
+export const WorkspaceCreateSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Name'
+        },
+        description: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 1000
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Description'
+        }
+    },
+    type: 'object',
+    required: ['name'],
+    title: 'WorkspaceCreate'
+} as const;
+
+export const WorkspacePublicSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Name'
+        },
+        description: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 1000
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Description'
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        owner_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Owner Id'
+        },
+        created_at: {
+            type: 'string',
+            title: 'Created At'
+        }
+    },
+    type: 'object',
+    required: ['name', 'id', 'owner_id', 'created_at'],
+    title: 'WorkspacePublic'
+} as const;
+
+export const WorkspaceUpdateSchema = {
+    properties: {
+        name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        },
+        description: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 1000
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Description'
+        }
+    },
+    type: 'object',
+    title: 'WorkspaceUpdate'
+} as const;
+
+export const WorkspacesPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/WorkspacePublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'WorkspacesPublic'
 } as const;

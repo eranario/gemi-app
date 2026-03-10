@@ -12,7 +12,11 @@ import { ProcessProvider } from "./contexts/ProcessContext"
 import "./index.css"
 import { routeTree } from "./routeTree.gen"
 
-OpenAPI.BASE = import.meta.env.VITE_API_URL
+// In production Tauri builds the sidecar injects __GEMI_BACKEND_URL__ before
+// the app loads, so we can use whatever free port was chosen at launch.
+// In dev mode (and when the env var is set) we fall back to VITE_API_URL.
+OpenAPI.BASE =
+  (window as any).__GEMI_BACKEND_URL__ ?? import.meta.env.VITE_API_URL ?? ""
 
 const queryClient = new QueryClient()
 

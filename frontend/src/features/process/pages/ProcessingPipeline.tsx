@@ -1,14 +1,16 @@
 import {
   ArrowLeft,
   Check,
-  Upload,
   Map,
   Brain,
   Settings,
   ChevronRight,
+  Plus,
+  X,
 } from "lucide-react";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -27,64 +29,171 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
-import { Badge } from "@/components/ui/badge";
+import { PipelinesService, type PipelinePublic } from "@/client";
+import useCustomToast from "@/hooks/useCustomToast";
+
+interface RoboflowModel {
+  label: string;
+  api_key: string;
+  model_id: string;
+  task_type: "detection" | "segmentation";
+}
+
+const EMPTY_MODEL = (): RoboflowModel => ({
+  label: "",
+  api_key: "",
+  model_id: "",
+  task_type: "detection",
+});
 
 type Step = 1 | 2 | 3;
+
+// Step 2 config defaults per type
+const GROUND_DEFAULT_CONFIG = {
+  device: "cpu" as "cpu" | "gpu",
+  custom_agrowstitch_options: "",
+};
+
+const AERIAL_DEFAULT_CONFIG = {
+  dem_resolution: "0.25",
+  orthophoto_resolution: "0.25",
+  custom_odm_options: "",
+};
 
 export function ProcessingPipeline() {
   const navigate = useNavigate();
   const { workspaceId } = useParams({
     from: "/_layout/process/$workspaceId/pipeline",
   });
-  const { type } = useSearch({
-    from: "/_layout/process/$workspaceId/pipeline",
-  });
+  const search = useSearch({ from: "/_layout/process/$workspaceId/pipeline" });
+  const pipelineType = search.type === "ground" ? "ground" : "aerial";
+  const editingPipelineId = search.pipelineId ?? null;
 
-  const pipelineType = type === "ground" ? "ground" : "aerial";
+  const queryClient = useQueryClient();
+  const { showErrorToast } = useCustomToast();
 
   const [currentStep, setCurrentStep] = useState<Step>(1);
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
 
-  // Step 1: Plot Boundary
+  // Step 1
   const [pipelineName, setPipelineName] = useState("");
-  const [boundarySource, setBoundarySource] = useState("");
 
-  // Step 2: Orthogeneration / Alignment
-  const [stitchingMethod, setStitchingMethod] = useState("");
-  const [resolution, setResolution] = useState("");
+  // Step 2 — ground
+  const [groundConfig, setGroundConfig] = useState(GROUND_DEFAULT_CONFIG);
 
-  // Step 3: Inference
-  const [modelType, setModelType] = useState("");
-  const [outputFormat, setOutputFormat] = useState("");
+  // Step 2 — aerial
+  const [aerialConfig, setAerialConfig] = useState(AERIAL_DEFAULT_CONFIG);
+
+  // Step 3 — Roboflow models (optional, multi-model)
+  const [roboflowModels, setRoboflowModels] = useState<RoboflowModel[]>([
+    EMPTY_MODEL(),
+  ]);
+
+  // Load existing pipeline when editing
+  const { data: existingPipeline } = useQuery<PipelinePublic>({
+    queryKey: ["pipelines-single", editingPipelineId],
+    queryFn: () => PipelinesService.readOne({ id: editingPipelineId! }),
+    enabled: !!editingPipelineId,
+  });
+
+  useEffect(() => {
+    if (!existingPipeline) return;
+    const cfg = (existingPipeline.config ?? {}) as Record<string, unknown>;
+    setPipelineName(existingPipeline.name);
+    if (existingPipeline.type === "ground") {
+      setGroundConfig({
+        device: (cfg.device as "cpu" | "gpu") ?? "cpu",
+        custom_agrowstitch_options:
+          (cfg.custom_agrowstitch_options as string) ?? "",
+      });
+    } else {
+      setAerialConfig({
+        dem_resolution: String(cfg.dem_resolution ?? "0.25"),
+        orthophoto_resolution: String(cfg.orthophoto_resolution ?? "0.25"),
+        custom_odm_options: (cfg.custom_odm_options as string) ?? "",
+      });
+    }
+    // Support new roboflow_models array and old single roboflow object
+    const rfModels = cfg.roboflow_models as RoboflowModel[] | null | undefined;
+    const rf = cfg.roboflow as Record<string, string> | null | undefined;
+    if (rfModels && rfModels.length > 0) {
+      setRoboflowModels(rfModels);
+    } else if (rf?.api_key) {
+      setRoboflowModels([
+        {
+          label: "Default",
+          api_key: rf.api_key ?? "",
+          model_id: rf.model_id ?? "",
+          task_type:
+            (rf.task_type as "detection" | "segmentation") ?? "detection",
+        },
+      ]);
+    }
+  }, [existingPipeline]);
 
   const steps = [
     {
       number: 1,
-      title: "Plot Boundary Prep",
-      description: "Define or import plot boundaries",
+      title: "Pipeline Setup",
+      description: "Name and configure the pipeline",
       icon: Map,
     },
     {
       number: 2,
-      title: pipelineType === "aerial" ? "Orthogeneration" : "Data Alignment",
+      title: pipelineType === "aerial" ? "ODM Settings" : "Stitch Settings",
       description:
         pipelineType === "aerial"
-          ? "Generate orthomosaic"
-          : "Align sensor data",
+          ? "Configure orthomosaic generation"
+          : "Configure AgRowStitch",
       icon: Settings,
     },
     {
       number: 3,
-      title: "Inference",
-      description: "Run phenotyping analysis",
+      title: "Roboflow",
+      description: "Set up inference model",
       icon: Brain,
     },
   ];
+
+  const configPayload = () => ({
+    ...(pipelineType === "ground" ? groundConfig : aerialConfig),
+    roboflow_models: roboflowModels.filter((m) => m.model_id.trim()),
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      editingPipelineId
+        ? PipelinesService.update({
+            id: editingPipelineId,
+            requestBody: { name: pipelineName, config: configPayload() },
+          })
+        : PipelinesService.create({
+            workspaceId,
+            requestBody: {
+              name: pipelineName,
+              type: pipelineType,
+              workspace_id: workspaceId,
+              config: configPayload(),
+            },
+          }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pipelines", workspaceId] });
+      navigate({ to: "/process/$workspaceId", params: { workspaceId } });
+    },
+    onError: () =>
+      showErrorToast(
+        editingPipelineId
+          ? "Failed to update pipeline"
+          : "Failed to create pipeline"
+      ),
+  });
 
   const handleNext = () => {
     setCompletedSteps(new Set([...completedSteps, currentStep]));
     if (currentStep < 3) {
       setCurrentStep((currentStep + 1) as Step);
+    } else {
+      saveMutation.mutate();
     }
   };
 
@@ -95,19 +204,23 @@ export function ProcessingPipeline() {
   };
 
   const isStepComplete = (step: number) => {
-    if (step === 1) return !!pipelineName && !!boundarySource;
-    if (step === 2)
-      return pipelineType === "ground" || (!!stitchingMethod && !!resolution);
-    if (step === 3) return !!modelType && !!outputFormat;
-    return false;
+    if (step === 1) return !!pipelineName.trim();
+    if (step === 2) {
+      if (pipelineType === "aerial") {
+        return (
+          !!aerialConfig.dem_resolution && !!aerialConfig.orthophoto_resolution
+        );
+      }
+      return !!groundConfig.device;
+    }
+    // Step 3 is optional — always completable
+    return true;
   };
-
-  const canProceed = isStepComplete(currentStep);
 
   return (
     <div className="bg-background min-h-screen">
       <div className="mx-auto max-w-5xl p-8">
-        <div className="flex items-center gap-4 mb-8">
+        <div className="mb-8 flex items-center gap-4">
           <Button
             variant="ghost"
             size="icon"
@@ -118,27 +231,27 @@ export function ProcessingPipeline() {
               })
             }
           >
-            <ArrowLeft className="w-5 h-5" />
+            <ArrowLeft className="h-5 w-5" />
           </Button>
           <div>
             <h1 className="text-2xl font-semibold">
-              {pipelineType === "aerial" ? "Aerial" : "Ground"} Processing
-              Pipeline
+              {editingPipelineId ? "Edit" : "New"}{" "}
+              {pipelineType === "aerial" ? "Aerial" : "Ground"} Pipeline
             </h1>
-            <p className="text-sm text-muted-foreground">
-              Follow the steps to process your {pipelineType} sensing data
+            <p className="text-muted-foreground text-sm">
+              Configure your {pipelineType} processing pipeline
             </p>
           </div>
         </div>
 
         {/* Progress Steps */}
         <div className="mb-8">
-          <div className="flex items-center justify-between mb-4">
+          <div className="mb-4 flex items-center justify-between">
             {steps.map((step, index) => (
-              <div key={step.number} className="flex items-center flex-1">
-                <div className="flex flex-col items-center flex-1">
+              <div key={step.number} className="flex flex-1 items-center">
+                <div className="flex flex-1 flex-col items-center">
                   <div
-                    className={`w-12 h-12 rounded-full flex items-center justify-center border-2 transition-colors ${
+                    className={`flex h-12 w-12 items-center justify-center rounded-full border-2 transition-colors ${
                       completedSteps.has(step.number)
                         ? "bg-primary border-primary text-primary-foreground"
                         : currentStep === step.number
@@ -147,14 +260,14 @@ export function ProcessingPipeline() {
                     }`}
                   >
                     {completedSteps.has(step.number) ? (
-                      <Check className="w-6 h-6" />
+                      <Check className="h-6 w-6" />
                     ) : (
-                      <step.icon className="w-6 h-6" />
+                      <step.icon className="h-6 w-6" />
                     )}
                   </div>
                   <div className="mt-2 text-center">
                     <p
-                      className={`font-medium text-sm ${
+                      className={`text-sm font-medium ${
                         currentStep === step.number
                           ? "text-foreground"
                           : "text-muted-foreground"
@@ -162,14 +275,14 @@ export function ProcessingPipeline() {
                     >
                       {step.title}
                     </p>
-                    <p className="text-xs text-muted-foreground hidden md:block">
+                    <p className="text-muted-foreground hidden text-xs md:block">
                       {step.description}
                     </p>
                   </div>
                 </div>
                 {index < steps.length - 1 && (
                   <div
-                    className={`h-0.5 flex-1 mx-4 transition-colors ${
+                    className={`mx-4 h-0.5 flex-1 transition-colors ${
                       completedSteps.has(step.number)
                         ? "bg-primary"
                         : "bg-border"
@@ -193,231 +306,246 @@ export function ProcessingPipeline() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
+            {/* Step 1: Name */}
             {currentStep === 1 && (
+              <div className="space-y-2">
+                <Label htmlFor="pipeline-name">Pipeline Name</Label>
+                <Input
+                  id="pipeline-name"
+                  placeholder="e.g., North Field Spring Survey"
+                  value={pipelineName}
+                  onChange={(e) => setPipelineName(e.target.value)}
+                  onKeyDown={(e) =>
+                    e.key === "Enter" && isStepComplete(1) && handleNext()
+                  }
+                />
+                <p className="text-muted-foreground text-xs">
+                  Plot boundaries and settings defined here will be reused when
+                  you run this pipeline on new dates.
+                </p>
+              </div>
+            )}
+
+            {/* Step 2: Processing settings */}
+            {currentStep === 2 && pipelineType === "aerial" && (
               <>
                 <div className="space-y-2">
-                  <Label htmlFor="pipeline-name">Pipeline Name</Label>
+                  <Label>DEM Resolution (cm/pixel)</Label>
+                  <Select
+                    value={aerialConfig.dem_resolution}
+                    onValueChange={(v) =>
+                      setAerialConfig({ ...aerialConfig, dem_resolution: v })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="0.25">0.25 cm (High)</SelectItem>
+                      <SelectItem value="0.5">0.5 cm (Medium)</SelectItem>
+                      <SelectItem value="1">1 cm (Low)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Orthophoto Resolution (cm/pixel)</Label>
+                  <Select
+                    value={aerialConfig.orthophoto_resolution}
+                    onValueChange={(v) =>
+                      setAerialConfig({
+                        ...aerialConfig,
+                        orthophoto_resolution: v,
+                      })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="0.25">0.25 cm (High)</SelectItem>
+                      <SelectItem value="0.5">0.5 cm (Medium)</SelectItem>
+                      <SelectItem value="1">1 cm (Low)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Additional ODM Options (optional)</Label>
                   <Input
-                    id="pipeline-name"
-                    placeholder="e.g., North Field Spring Survey"
-                    value={pipelineName}
-                    onChange={(e) => setPipelineName(e.target.value)}
+                    placeholder="e.g., --feature-type sift --matcher-neighbors 8"
+                    value={aerialConfig.custom_odm_options}
+                    onChange={(e) =>
+                      setAerialConfig({
+                        ...aerialConfig,
+                        custom_odm_options: e.target.value,
+                      })
+                    }
+                  />
+                  <p className="text-muted-foreground text-xs">
+                    Raw ODM CLI flags passed directly to OpenDroneMap.
+                  </p>
+                </div>
+              </>
+            )}
+
+            {currentStep === 2 && pipelineType === "ground" && (
+              <>
+                <div className="space-y-2">
+                  <Label>Processing Device</Label>
+                  <Select
+                    value={groundConfig.device}
+                    onValueChange={(v: "cpu" | "gpu") =>
+                      setGroundConfig({ ...groundConfig, device: v })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="cpu">CPU</SelectItem>
+                      <SelectItem value="gpu">GPU (CUDA)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-muted-foreground text-xs">
+                    GPU significantly speeds up AgRowStitch stitching. Stitch
+                    direction is set per-plot during the plot marking step.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Additional AgRowStitch Options (optional)</Label>
+                  <Input
+                    placeholder="Custom YAML overrides"
+                    value={groundConfig.custom_agrowstitch_options}
+                    onChange={(e) =>
+                      setGroundConfig({
+                        ...groundConfig,
+                        custom_agrowstitch_options: e.target.value,
+                      })
+                    }
                   />
                 </div>
-
-                <div className="space-y-2">
-                  <Label>Boundary Source</Label>
-                  <Select
-                    value={boundarySource}
-                    onValueChange={setBoundarySource}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select boundary source" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="create">
-                        Create new boundaries
-                      </SelectItem>
-                      <SelectItem value="upload">Upload Shapefile</SelectItem>
-                      <SelectItem value="gps">
-                        Import GPS Coordinates
-                      </SelectItem>
-                      <SelectItem value="auto">
-                        Auto-detect from imagery
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {boundarySource === "upload" && (
-                  <div className="border-2 border-dashed rounded-lg p-8">
-                    <div className="flex flex-col items-center justify-center gap-2 text-center">
-                      <Upload className="w-8 h-8 text-muted-foreground" />
-                      <div>
-                        <p className="font-medium">Upload Shapefile</p>
-                        <p className="text-sm text-muted-foreground">
-                          Drop your .shp, .shx, and .dbf files here
-                        </p>
-                      </div>
-                      <Button variant="outline" size="sm" className="mt-2">
-                        Browse Files
-                      </Button>
-                    </div>
-                  </div>
-                )}
               </>
             )}
 
-            {currentStep === 2 && (
-              <>
-                {pipelineType === "aerial" ? (
-                  <>
-                    <div className="space-y-2">
-                      <Label>Stitching Method</Label>
-                      <Select
-                        value={stitchingMethod}
-                        onValueChange={setStitchingMethod}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select stitching algorithm" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="sfm">
-                            Structure from Motion (SfM)
-                          </SelectItem>
-                          <SelectItem value="direct">
-                            Direct Linear Transformation
-                          </SelectItem>
-                          <SelectItem value="feature">
-                            Feature-based Matching
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Output Resolution</Label>
-                      <Select
-                        value={resolution}
-                        onValueChange={setResolution}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select resolution" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="1cm">
-                            1 cm/pixel (High)
-                          </SelectItem>
-                          <SelectItem value="2cm">
-                            2 cm/pixel (Medium)
-                          </SelectItem>
-                          <SelectItem value="5cm">
-                            5 cm/pixel (Low)
-                          </SelectItem>
-                          <SelectItem value="auto">
-                            Auto-detect optimal
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-lg">
-                      <p className="text-sm text-blue-900">
-                        <strong>Tip:</strong> Higher resolution provides more
-                        detail but requires more processing time and storage.
-                      </p>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="space-y-2">
-                      <Label>Alignment Method</Label>
-                      <Select
-                        value={stitchingMethod}
-                        onValueChange={setStitchingMethod}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select alignment method" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="timestamp">
-                            Timestamp-based
-                          </SelectItem>
-                          <SelectItem value="gps">GPS Coordinates</SelectItem>
-                          <SelectItem value="marker">
-                            Reference Markers
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Data Interpolation</Label>
-                      <Select
-                        value={resolution}
-                        onValueChange={setResolution}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select interpolation" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="linear">Linear</SelectItem>
-                          <SelectItem value="cubic">Cubic Spline</SelectItem>
-                          <SelectItem value="none">None</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-
+            {/* Step 3: Roboflow models (optional) */}
             {currentStep === 3 && (
               <>
-                <div className="space-y-2">
-                  <Label>Analysis Model</Label>
-                  <Select value={modelType} onValueChange={setModelType}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select analysis model" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="ndvi">
-                        <div className="flex items-center gap-2">
-                          <span>NDVI (Vegetation Index)</span>
-                          <Badge variant="secondary" className="text-xs">
-                            Popular
-                          </Badge>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="plant-count">
-                        Plant Counting
-                      </SelectItem>
-                      <SelectItem value="height">
-                        Height Measurement
-                      </SelectItem>
-                      <SelectItem value="disease">
-                        Disease Detection
-                      </SelectItem>
-                      <SelectItem value="yield">Yield Prediction</SelectItem>
-                      <SelectItem value="custom">Custom Model</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                <p className="text-muted-foreground text-sm">
+                  Add one or more Roboflow models for inference on your plot
+                  images. Leave empty to skip — you can configure and run
+                  inference later from the run view.
+                </p>
 
-                <div className="space-y-2">
-                  <Label>Output Format</Label>
-                  <Select
-                    value={outputFormat}
-                    onValueChange={setOutputFormat}
+                <div className="space-y-3">
+                  {/* Column headers */}
+                  <div className="grid grid-cols-[1fr_1fr_1fr_auto_auto] gap-2">
+                    <Label className="text-muted-foreground text-xs">
+                      Name
+                    </Label>
+                    <Label className="text-muted-foreground text-xs">
+                      API Key
+                    </Label>
+                    <Label className="text-muted-foreground text-xs">
+                      Model ID
+                    </Label>
+                    <Label className="text-muted-foreground text-xs">
+                      Task
+                    </Label>
+                    <span />
+                  </div>
+
+                  {roboflowModels.map((model, idx) => (
+                    <div
+                      key={idx}
+                      className="grid grid-cols-[1fr_1fr_1fr_auto_auto] items-center gap-2"
+                    >
+                      <Input
+                        placeholder="e.g. Wheat Detection"
+                        value={model.label}
+                        onChange={(e) =>
+                          setRoboflowModels((prev) =>
+                            prev.map((m, i) =>
+                              i === idx ? { ...m, label: e.target.value } : m
+                            )
+                          )
+                        }
+                      />
+                      <Input
+                        type="password"
+                        placeholder="rf_xxxxxxxxxxxx"
+                        value={model.api_key}
+                        onChange={(e) =>
+                          setRoboflowModels((prev) =>
+                            prev.map((m, i) =>
+                              i === idx ? { ...m, api_key: e.target.value } : m
+                            )
+                          )
+                        }
+                      />
+                      <Input
+                        placeholder="my-project/3"
+                        value={model.model_id}
+                        onChange={(e) =>
+                          setRoboflowModels((prev) =>
+                            prev.map((m, i) =>
+                              i === idx ? { ...m, model_id: e.target.value } : m
+                            )
+                          )
+                        }
+                      />
+                      <Select
+                        value={model.task_type}
+                        onValueChange={(v: "detection" | "segmentation") =>
+                          setRoboflowModels((prev) =>
+                            prev.map((m, i) =>
+                              i === idx ? { ...m, task_type: v } : m
+                            )
+                          )
+                        }
+                      >
+                        <SelectTrigger className="w-36">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="detection">Detection</SelectItem>
+                          <SelectItem value="segmentation">
+                            Segmentation
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() =>
+                          setRoboflowModels((prev) =>
+                            prev.filter((_, i) => i !== idx)
+                          )
+                        }
+                        disabled={roboflowModels.length === 1}
+                      >
+                        <X className="text-muted-foreground h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setRoboflowModels((prev) => [...prev, EMPTY_MODEL()])
+                    }
                   >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select output format" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="csv">
-                        CSV (Tabular Data)
-                      </SelectItem>
-                      <SelectItem value="geojson">
-                        GeoJSON (Spatial Data)
-                      </SelectItem>
-                      <SelectItem value="tiff">
-                        GeoTIFF (Raster Maps)
-                      </SelectItem>
-                      <SelectItem value="all">All Formats</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    <Plus className="mr-1 h-4 w-4" />
+                    Add Model
+                  </Button>
                 </div>
 
-                <div className="space-y-4 p-4 bg-muted/50 rounded-lg">
-                  <h4 className="font-medium">Pipeline Summary</h4>
-                  <div className="space-y-2 text-sm">
+                {/* Summary */}
+                <div className="bg-muted/50 space-y-2 rounded-lg p-4">
+                  <h4 className="text-sm font-medium">Pipeline Summary</h4>
+                  <div className="space-y-1 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">
-                        Pipeline Name:
-                      </span>
-                      <span className="font-medium">
-                        {pipelineName || "Not set"}
-                      </span>
+                      <span className="text-muted-foreground">Name:</span>
+                      <span className="font-medium">{pipelineName}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Type:</span>
@@ -425,28 +553,36 @@ export function ProcessingPipeline() {
                         {pipelineType}
                       </span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">
-                        Plot Boundaries:
-                      </span>
-                      <span className="font-medium">
-                        {boundarySource || "Not set"}
-                      </span>
-                    </div>
                     {pipelineType === "aerial" && (
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">
-                          Resolution:
+                          Orthophoto resolution:
                         </span>
                         <span className="font-medium">
-                          {resolution || "Not set"}
+                          {aerialConfig.orthophoto_resolution} cm/px
+                        </span>
+                      </div>
+                    )}
+                    {pipelineType === "ground" && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Device:</span>
+                        <span className="font-medium uppercase">
+                          {groundConfig.device}
                         </span>
                       </div>
                     )}
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">Analysis:</span>
+                      <span className="text-muted-foreground">
+                        Roboflow models:
+                      </span>
                       <span className="font-medium">
-                        {modelType || "Not set"}
+                        {roboflowModels.filter((m) => m.model_id.trim())
+                          .length > 0
+                          ? roboflowModels
+                              .filter((m) => m.model_id.trim())
+                              .map((m) => m.label || m.model_id)
+                              .join(", ")
+                          : "—"}
                       </span>
                     </div>
                   </div>
@@ -456,8 +592,8 @@ export function ProcessingPipeline() {
           </CardContent>
         </Card>
 
-        {/* Navigation Buttons */}
-        <div className="flex items-center justify-between mt-6">
+        {/* Navigation */}
+        <div className="mt-6 flex items-center justify-between">
           <Button
             variant="outline"
             onClick={handlePrevious}
@@ -465,12 +601,19 @@ export function ProcessingPipeline() {
           >
             Previous
           </Button>
-          <div className="text-sm text-muted-foreground">
+          <div className="text-muted-foreground text-sm">
             Step {currentStep} of {steps.length}
           </div>
-          <Button onClick={handleNext} disabled={!canProceed}>
-            {currentStep === 3 ? "Start Processing" : "Next"}
-            {currentStep < 3 && <ChevronRight className="w-4 h-4 ml-2" />}
+          <Button
+            onClick={handleNext}
+            disabled={!isStepComplete(currentStep) || saveMutation.isPending}
+          >
+            {currentStep === 3
+              ? editingPipelineId
+                ? "Save Changes"
+                : "Create Pipeline"
+              : "Next"}
+            {currentStep < 3 && <ChevronRight className="ml-2 h-4 w-4" />}
           </Button>
         </div>
       </div>
