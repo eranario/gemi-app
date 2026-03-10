@@ -156,10 +156,9 @@ function NewRunDialog({
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New Run — {pipeline.name}</DialogTitle>
+          <DialogTitle>New Run - {pipeline.name}</DialogTitle>
           <DialogDescription>
-            Select the uploaded dataset to process. The run will reuse existing
-            plot boundaries if available.
+            Select the uploaded dataset to process.
           </DialogDescription>
         </DialogHeader>
 
@@ -585,7 +584,7 @@ export function WorkspaceDetail() {
               </CardHeader>
               <CardContent>
                 <p className="text-muted-foreground text-sm">
-                  Plot marking → AgRowStitch → Train → Traits
+                  Plot marking → AgRowStitch → Plot boundaries → Train → Traits
                 </p>
               </CardContent>
             </Card>

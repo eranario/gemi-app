@@ -1,10 +1,12 @@
 import { useCallback, useState } from "react";
 import { FilesService } from "@/client";
 import { DataStructureForm, DataTypes, UploadList } from "../components";
+import { GeoTiffValidationDialog } from "../components/GeoTiffValidationDialog";
 
 export function UploadData() {
   const [selectedFileType, setSelectedFileType] = useState<string | null>(null);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
+  const [pendingValidation, setPendingValidation] = useState<string[]>([]);
 
   const handleFormChange = (field: string, value: string) => {
     setFormValues((prev) => ({ ...prev, [field]: value }));
@@ -35,6 +37,15 @@ export function UploadData() {
     [],
   );
 
+  const handleUploadComplete = useCallback(
+    (destPaths: string[]) => {
+      if (selectedFileType !== "Orthomosaic") return;
+      const tifs = destPaths.filter((p) => /\.(tif|tiff)$/i.test(p));
+      if (tifs.length > 0) setPendingValidation(tifs);
+    },
+    [selectedFileType],
+  );
+
   return (
     <div className="bg-background min-h-screen">
       <div className="mx-auto max-w-5xl p-8">
@@ -49,9 +60,17 @@ export function UploadData() {
             dataType={selectedFileType}
             formValues={formValues}
             onFilesSelected={handleFilesSelected}
+            onUploadComplete={handleUploadComplete}
           />
         </div>
       </div>
+
+      {pendingValidation.length > 0 && (
+        <GeoTiffValidationDialog
+          destPaths={pendingValidation}
+          onClose={() => setPendingValidation([])}
+        />
+      )}
     </div>
   );
 }

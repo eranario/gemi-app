@@ -1,4 +1,4 @@
-import { Plus, FolderOpen, MoreVertical, Trash2 } from "lucide-react"
+import { Plus, FolderOpen, MoreVertical, Trash2, RefreshCw } from "lucide-react"
 import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -37,7 +37,7 @@ export function WorkspaceDashboard() {
   const [open, setOpen] = useState(false)
   const [newWorkspace, setNewWorkspace] = useState({ name: "", description: "" })
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ["workspaces"],
     queryFn: () => WorkspacesService.readAll(),
   })
@@ -79,7 +79,17 @@ export function WorkspaceDashboard() {
               Create and manage your phenotyping projects
             </p>
           </div>
-          <Dialog open={open} onOpenChange={setOpen}>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => refetch()}
+              disabled={isFetching}
+              title="Refresh workspaces"
+            >
+              <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+            </Button>
+            <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
               <Button>
                 <Plus className="mr-2 h-4 w-4" />
@@ -133,6 +143,7 @@ export function WorkspaceDashboard() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+          </div>
         </div>
 
         {isLoading ? (

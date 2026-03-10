@@ -154,8 +154,10 @@ def run_orthomosaic(
     run_id: uuid.UUID,
     stop_event: threading.Event,
     emit: Callable[[dict], None],
-    dem_resolution: float = 0.25,
-    orthophoto_resolution: float = 0.25,
+    dem_resolution: float = 3.0,
+    orthophoto_resolution: float = 3.0,
+    pc_quality: str = "medium",
+    feature_quality: str = "high",
     custom_odm_options: str = "",
 ) -> dict[str, Any]:
     """
@@ -217,7 +219,12 @@ def run_orthomosaic(
     if custom_odm_options:
         odm_options += f" {custom_odm_options}"
     else:
-        odm_options += f" --dem-resolution {dem_resolution} --orthophoto-resolution {orthophoto_resolution}"
+        odm_options += (
+            f" --dem-resolution {dem_resolution}"
+            f" --orthophoto-resolution {orthophoto_resolution}"
+            f" --pc-quality {pc_quality}"
+            f" --feature-quality {feature_quality}"
+        )
 
     container_name = f"ODM-gemi-{run_id!s:.8}"
 

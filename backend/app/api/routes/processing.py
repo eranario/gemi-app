@@ -27,6 +27,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import os
 import shutil
 import uuid
 import zipfile
@@ -125,17 +126,20 @@ def execute_step(
             ),
         }
     else:
-        from app.processing import aerial
+        from app.processing import aerial, sync
         dispatch = {
+            "data_sync": (sync.run_data_sync, {}),
             "orthomosaic": (
                 aerial.run_orthomosaic,
                 {
                     "dem_resolution": float(
-                        (pipeline.config or {}).get("dem_resolution", 0.25)
+                        (pipeline.config or {}).get("dem_resolution", 3.0)
                     ),
                     "orthophoto_resolution": float(
-                        (pipeline.config or {}).get("orthophoto_resolution", 0.25)
+                        (pipeline.config or {}).get("orthophoto_resolution", 3.0)
                     ),
+                    "pc_quality": (pipeline.config or {}).get("pc_quality", "medium"),
+                    "feature_quality": (pipeline.config or {}).get("feature_quality", "high"),
                     "custom_odm_options": (pipeline.config or {}).get("custom_odm_options", ""),
                 },
             ),
@@ -552,17 +556,33 @@ def save_plot_boundaries(
 ) -> dict[str, Any]:
     run = _get_run_or_404(session, id)
     pipeline = session.get(Pipeline, run.pipeline_id)
-    if not pipeline or pipeline.type != "aerial":
-        raise HTTPException(status_code=400, detail="Not an aerial pipeline")
+    if not pipeline:
+        raise HTTPException(status_code=400, detail="Pipeline not found")
 
-    from app.processing.aerial import save_plot_boundaries as _save
-
-    outputs = _save(
-        session=session,
-        run_id=id,
-        geojson=body.geojson,
-        version=body.version,
-    )
+    if pipeline.type == "ground":
+        # Ground: write the adjusted polygons back as plot_boundaries.geojson
+        # in the georeferencing output dir (overwriting the auto-generated one)
+        paths = _get_paths(session, run)
+        geo_rel = (run.outputs or {}).get("georeferencing")
+        if not geo_rel:
+            raise HTTPException(
+                status_code=400,
+                detail="Georeferencing output not found. Complete the Georeferencing step first.",
+            )
+        geo_dir = paths.abs(geo_rel)
+        geojson_path = geo_dir / "plot_boundaries.geojson"
+        geojson_path.write_text(json.dumps(body.geojson, indent=2))
+        logger.info("Saved ground plot_boundaries.geojson with %d features to %s",
+                    len(body.geojson.get("features", [])), geojson_path)
+        outputs = {"plot_boundaries_geojson": paths.rel(geojson_path)}
+    else:
+        from app.processing.aerial import save_plot_boundaries as _save
+        outputs = _save(
+            session=session,
+            run_id=id,
+            geojson=body.geojson,
+            version=body.version,
+        )
 
     existing_outputs = dict(run.outputs or {})
     existing_outputs.update(outputs)
@@ -741,45 +761,8 @@ def _read_geotiff_wgs84_bounds(
 
 # ── Aerial: orthomosaic info (for BoundaryDrawer) ────────────────────────────
 
-@router.get("/pipeline-runs/{id}/orthomosaic-info")
-def orthomosaic_info(
-    session: SessionDep,
-    current_user: CurrentUser,
-    id: uuid.UUID,
-) -> dict[str, Any]:
-    """
-    Return the orthomosaic path and WGS84 bounding box so the frontend can
-    render it as a Leaflet ImageOverlay and let the user draw plot polygons.
-
-    Returns:
-        {
-          "available": bool,
-          "path": str | None,        # absolute path for /files/serve
-          "bounds": [[s, w], [n, e]] | None,  # Leaflet LatLngBounds format
-          "existing_geojson": {...} | None,   # if Plot-Boundary-WGS84.geojson exists
-        }
-    """
-    run = _get_run_or_404(session, id)
-    pipeline = session.get(Pipeline, run.pipeline_id)
-    if not pipeline or pipeline.type != "aerial":
-        raise HTTPException(status_code=400, detail="Not an aerial pipeline")
-
-    paths = _get_paths(session, run)
-
-    # Prefer the Pyramid/COG if it exists, fall back to full RGB
-    tif = paths.aerial_rgb_pyramid if paths.aerial_rgb_pyramid.exists() else paths.aerial_rgb
-
-    if not tif.exists():
-        return {
-            "available": False,
-            "path": None,
-            "bounds": None,
-            "existing_geojson": None,
-        }
-
-    # Read WGS84 bounds — prefer rasterio (handles UTM + any CRS), fall back to
-    # pure-Python parser for WGS84-only TIFs when rasterio is unavailable.
-    bounds = None
+def _read_tif_bounds(tif: Path) -> list[list[float]] | None:
+    """Read WGS84 bounds from a GeoTIFF, trying rasterio then pure-Python."""
     try:
         import rasterio
         from rasterio.crs import CRS
@@ -794,28 +777,166 @@ def orthomosaic_info(
                 src.bounds.right,
                 src.bounds.top,
             )
-        bounds = [[bottom, left], [top, right]]
+        return [[bottom, left], [top, right]]
     except Exception as exc:
         logger.warning("rasterio bounds failed (%s), trying pure-Python parser", exc)
         try:
-            bounds = _read_geotiff_wgs84_bounds(tif)
+            return _read_geotiff_wgs84_bounds(tif)
         except Exception as exc2:
-            logger.warning("Could not read orthomosaic bounds: %s", exc2)
+            logger.warning("Could not read TIF bounds: %s", exc2)
+            return None
 
-    # Load existing boundary GeoJSON if present
-    existing_geojson = None
-    if paths.plot_boundary_geojson.exists():
-        try:
-            existing_geojson = json.loads(paths.plot_boundary_geojson.read_text())
-        except Exception:
-            pass
 
-    return {
-        "available": True,
-        "path": str(tif),
-        "bounds": bounds,
-        "existing_geojson": existing_geojson,
-    }
+@router.get("/pipeline-runs/{id}/orthomosaic-info")
+def orthomosaic_info(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> dict[str, Any]:
+    """
+    Return the mosaic image path and WGS84 bounding box so BoundaryDrawer can
+    render it as a Leaflet ImageOverlay.  Works for both pipeline types:
+
+    - Aerial: returns RGB.tif (or Pyramid.tif), existing Plot-Boundary-WGS84.geojson
+    - Ground: returns combined_mosaic.tif from georeferencing output dir,
+              existing plot_boundaries.geojson (georeferenced plot footprints)
+
+    Response shape:
+        {
+          "available": bool,
+          "path": str | None,                 # absolute path for /files/serve
+          "bounds": [[s, w], [n, e]] | None,  # Leaflet LatLngBounds format
+          "existing_geojson": {...} | None,
+        }
+    """
+    run = _get_run_or_404(session, id)
+    pipeline = session.get(Pipeline, run.pipeline_id)
+    paths = _get_paths(session, run)
+
+    not_available = {"available": False, "path": None, "bounds": None, "existing_geojson": None}
+
+    if pipeline and pipeline.type == "ground":
+        # Ground: combined_mosaic.tif lives inside the georeferencing output dir
+        geo_rel = (run.outputs or {}).get("georeferencing")
+        if not geo_rel:
+            return not_available
+        geo_dir = paths.abs(geo_rel)
+        tif = geo_dir / "combined_mosaic.tif"
+        if not tif.exists():
+            return not_available
+
+        bounds = _read_tif_bounds(tif)
+
+        # Load existing plot_boundaries.geojson (georeferenced plot footprints)
+        existing_geojson = None
+        geo_json_rel = (run.outputs or {}).get("plot_boundaries_geojson")
+        if geo_json_rel:
+            geo_json_path = paths.abs(geo_json_rel)
+            if geo_json_path.exists():
+                try:
+                    existing_geojson = json.loads(geo_json_path.read_text())
+                except Exception:
+                    pass
+
+        return {
+            "available": True,
+            "path": str(tif),
+            "bounds": bounds,
+            "existing_geojson": existing_geojson,
+        }
+
+    else:
+        # Aerial: prefer Pyramid/COG, fall back to full RGB
+        tif = paths.aerial_rgb_pyramid if paths.aerial_rgb_pyramid.exists() else paths.aerial_rgb
+        if not tif.exists():
+            return not_available
+
+        bounds = _read_tif_bounds(tif)
+
+        existing_geojson = None
+        if paths.plot_boundary_geojson.exists():
+            try:
+                existing_geojson = json.loads(paths.plot_boundary_geojson.read_text())
+            except Exception:
+                pass
+
+        return {
+            "available": True,
+            "path": str(tif),
+            "bounds": bounds,
+            "existing_geojson": existing_geojson,
+        }
+
+
+# ── Aerial: use uploaded orthomosaic (skip ODM step) ─────────────────────────
+
+@router.post("/pipeline-runs/{id}/use-uploaded-ortho")
+def use_uploaded_ortho(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> dict[str, Any]:
+    """
+    Register a user-uploaded orthomosaic TIF as the orthomosaic output for this
+    run, skipping ODM generation entirely.
+
+    Expects the TIF to be in:
+        Raw/{year}/{exp}/{loc}/{pop}/{date}/{platform}/{sensor}/Orthomosaic/
+
+    The file is hard-linked (or copied if cross-device) to the processed dir
+    as {date}-RGB.tif and the run's orthomosaic step is marked complete.
+    """
+    run = _get_run_or_404(session, id)
+    pipeline = session.get(Pipeline, run.pipeline_id)
+    if not pipeline or pipeline.type != "aerial":
+        raise HTTPException(status_code=400, detail="Not an aerial pipeline")
+
+    paths = _get_paths(session, run)
+
+    # Uploaded orthomosaics live inside an Orthomosaic/ sub-dir of the run's Raw dir
+    ortho_dir = paths.raw / "Orthomosaic"
+    if not ortho_dir.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "No Orthomosaic directory found at the expected Raw path. "
+                "Upload a GeoTIFF via Files → Orthomosaic first, using the "
+                "same experiment/location/population/date/platform/sensor."
+            ),
+        )
+
+    tif_files = sorted(
+        p for p in ortho_dir.iterdir()
+        if p.suffix.lower() in {".tif", ".tiff"} and ".original" not in p.stem
+    )
+    if not tif_files:
+        raise HTTPException(status_code=404, detail="No TIF files found in Orthomosaic directory")
+
+    src_tif = tif_files[0]
+    paths.make_dirs()
+    dest_tif = paths.aerial_rgb
+
+    # Hard-link for instant registration (same filesystem); fall back to copy
+    try:
+        if dest_tif.exists():
+            dest_tif.unlink()
+        os.link(src_tif, dest_tif)
+    except OSError:
+        shutil.copy2(src_tif, dest_tif)
+
+    logger.info("Registered uploaded ortho %s → %s", src_tif.name, dest_tif)
+
+    existing_outputs = dict(run.outputs or {})
+    existing_outputs["orthomosaic"] = paths.rel(dest_tif)
+    existing_steps = dict(run.steps_completed or {})
+    existing_steps["orthomosaic"] = True
+
+    update_pipeline_run(
+        session=session,
+        db_run=run,
+        run_in=PipelineRunUpdate(steps_completed=existing_steps, outputs=existing_outputs),
+    )
+    return {"status": "registered", "tif": paths.rel(dest_tif)}
 
 
 # ── Shared: inference results ────────────────────────────────────────────────

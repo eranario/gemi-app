@@ -9,13 +9,14 @@ interface UploadListProps {
   dataType: string | null;
   formValues: Record<string, string>;
   onFilesSelected?: (paths: string[]) => void;
+  onUploadComplete?: (destPaths: string[]) => void;
 }
 
 function fileNameFromPath(path: string): string {
   return path.split(/[\\/]/).pop() || path;
 }
 
-export function UploadList({ dataType, formValues, onFilesSelected }: UploadListProps) {
+export function UploadList({ dataType, formValues, onFilesSelected, onUploadComplete }: UploadListProps) {
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
   const { uploadFiles } = useFileUpload();
@@ -54,6 +55,7 @@ export function UploadList({ dataType, formValues, onFilesSelected }: UploadList
       dataType,
       targetRootDir,
       formValues: values,
+      onComplete: onUploadComplete,
     });
 
     setSelectedPaths([]);

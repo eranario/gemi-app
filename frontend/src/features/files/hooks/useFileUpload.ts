@@ -9,6 +9,8 @@ interface UploadParams {
   targetRootDir: string
   reupload?: boolean
   formValues?: Record<string, string>
+  /** Called with absolute dest paths of all successfully uploaded files */
+  onComplete?: (destPaths: string[]) => void
 }
 
 function fileNameFromPath(path: string): string {
@@ -20,7 +22,7 @@ export function useFileUpload() {
   const { showErrorToastWithCopy } = useCustomToast()
 
   const uploadFiles = useCallback(
-    async ({ filePaths, dataType, targetRootDir, reupload = false, formValues = {} }: UploadParams) => {
+    async ({ filePaths, dataType, targetRootDir, reupload = false, formValues = {}, onComplete }: UploadParams) => {
       const items: ProcessItem[] = filePaths.map((p, i) => ({
         id: String(i),
         name: fileNameFromPath(p),
@@ -83,6 +85,7 @@ export function useFileUpload() {
 
         const decoder = new TextDecoder()
         let buffer = ""
+        const completedDestPaths: string[] = []
 
         while (true) {
           const { done, value } = await reader.read()
@@ -109,6 +112,9 @@ export function useFileUpload() {
                   updateProcessItem(processId, String(data.index), {
                     status: data.status,
                   })
+                  if (data.status === "completed" && data.dest_path) {
+                    completedDestPaths.push(data.dest_path as string)
+                  }
                   break
 
                 case "error":
@@ -124,6 +130,7 @@ export function useFileUpload() {
                     completedAt: new Date(),
                     title: `Uploaded ${data.count} file(s)`,
                   })
+                  onComplete?.(completedDestPaths)
                   break
               }
             } catch {

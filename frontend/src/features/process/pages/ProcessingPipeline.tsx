@@ -54,9 +54,22 @@ const GROUND_DEFAULT_CONFIG = {
   custom_agrowstitch_options: "",
 };
 
+type OdmPreset = "draft" | "standard" | "high" | "ultra" | "custom"
+
+const ODM_PRESETS: Record<OdmPreset, { label: string; desc: string; dem: string; ortho: string; pc: string; feat: string }> = {
+  draft:    { label: "Draft",        desc: "Fastest, lowest quality — good for quick previews",         dem: "5",  ortho: "5",  pc: "lowest", feat: "low"   },
+  standard: { label: "Standard",     desc: "Balanced speed and quality — recommended for most surveys",  dem: "3",  ortho: "3",  pc: "medium", feat: "high"  },
+  high:     { label: "High Quality", desc: "Slower but detailed — suitable for final deliverables",      dem: "2",  ortho: "2",  pc: "high",   feat: "ultra" },
+  ultra:    { label: "Ultra",        desc: "Maximum quality, very slow — use for critical analysis",     dem: "1",  ortho: "1",  pc: "ultra",  feat: "ultra" },
+  custom:   { label: "Custom",       desc: "Set resolution and quality options manually",                dem: "3",  ortho: "3",  pc: "medium", feat: "high"  },
+}
+
 const AERIAL_DEFAULT_CONFIG = {
-  dem_resolution: "0.25",
-  orthophoto_resolution: "0.25",
+  odm_preset: "standard" as OdmPreset,
+  dem_resolution: "3",
+  orthophoto_resolution: "3",
+  pc_quality: "medium",
+  feature_quality: "high",
   custom_odm_options: "",
 };
 
@@ -108,8 +121,11 @@ export function ProcessingPipeline() {
       });
     } else {
       setAerialConfig({
-        dem_resolution: String(cfg.dem_resolution ?? "0.25"),
-        orthophoto_resolution: String(cfg.orthophoto_resolution ?? "0.25"),
+        odm_preset: (cfg.odm_preset as OdmPreset) ?? "standard",
+        dem_resolution: String(cfg.dem_resolution ?? "3"),
+        orthophoto_resolution: String(cfg.orthophoto_resolution ?? "3"),
+        pc_quality: (cfg.pc_quality as string) ?? "medium",
+        feature_quality: (cfg.feature_quality as string) ?? "high",
         custom_odm_options: (cfg.custom_odm_options as string) ?? "",
       });
     }
@@ -207,9 +223,7 @@ export function ProcessingPipeline() {
     if (step === 1) return !!pipelineName.trim();
     if (step === 2) {
       if (pipelineType === "aerial") {
-        return (
-          !!aerialConfig.dem_resolution && !!aerialConfig.orthophoto_resolution
-        );
+        return !!aerialConfig.odm_preset
       }
       return !!groundConfig.device;
     }
@@ -330,60 +344,146 @@ export function ProcessingPipeline() {
             {currentStep === 2 && pipelineType === "aerial" && (
               <>
                 <div className="space-y-2">
-                  <Label>DEM Resolution (cm/pixel)</Label>
-                  <Select
-                    value={aerialConfig.dem_resolution}
-                    onValueChange={(v) =>
-                      setAerialConfig({ ...aerialConfig, dem_resolution: v })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="0.25">0.25 cm (High)</SelectItem>
-                      <SelectItem value="0.5">0.5 cm (Medium)</SelectItem>
-                      <SelectItem value="1">1 cm (Low)</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Label>Processing Quality</Label>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {(Object.entries(ODM_PRESETS) as [OdmPreset, typeof ODM_PRESETS[OdmPreset]][]).map(([key, preset]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => {
+                          setAerialConfig({
+                            ...aerialConfig,
+                            odm_preset: key,
+                            ...(key !== "custom" && {
+                              dem_resolution: preset.dem,
+                              orthophoto_resolution: preset.ortho,
+                              pc_quality: preset.pc,
+                              feature_quality: preset.feat,
+                            }),
+                          })
+                        }}
+                        className={`text-left rounded-lg border p-3 transition-colors ${
+                          aerialConfig.odm_preset === key
+                            ? "border-primary bg-primary/5"
+                            : "border-border hover:border-primary/50"
+                        }`}
+                      >
+                        <p className="text-sm font-medium">{preset.label}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{preset.desc}</p>
+                        {key !== "custom" && (
+                          <p className="text-xs text-muted-foreground mt-1 font-mono">
+                            {preset.ortho} cm/px · {preset.pc} quality
+                          </p>
+                        )}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>Orthophoto Resolution (cm/pixel)</Label>
-                  <Select
-                    value={aerialConfig.orthophoto_resolution}
-                    onValueChange={(v) =>
-                      setAerialConfig({
-                        ...aerialConfig,
-                        orthophoto_resolution: v,
-                      })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="0.25">0.25 cm (High)</SelectItem>
-                      <SelectItem value="0.5">0.5 cm (Medium)</SelectItem>
-                      <SelectItem value="1">1 cm (Low)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Additional ODM Options (optional)</Label>
-                  <Input
-                    placeholder="e.g., --feature-type sift --matcher-neighbors 8"
-                    value={aerialConfig.custom_odm_options}
-                    onChange={(e) =>
-                      setAerialConfig({
-                        ...aerialConfig,
-                        custom_odm_options: e.target.value,
-                      })
-                    }
-                  />
-                  <p className="text-muted-foreground text-xs">
-                    Raw ODM CLI flags passed directly to OpenDroneMap.
-                  </p>
-                </div>
+
+                {aerialConfig.odm_preset === "custom" && (
+                  <>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>DEM Resolution (cm/px)</Label>
+                        <Select
+                          value={aerialConfig.dem_resolution}
+                          onValueChange={(v) =>
+                            setAerialConfig({ ...aerialConfig, dem_resolution: v })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="1">1 cm</SelectItem>
+                            <SelectItem value="2">2 cm</SelectItem>
+                            <SelectItem value="3">3 cm</SelectItem>
+                            <SelectItem value="5">5 cm</SelectItem>
+                            <SelectItem value="10">10 cm</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Orthophoto Resolution (cm/px)</Label>
+                        <Select
+                          value={aerialConfig.orthophoto_resolution}
+                          onValueChange={(v) =>
+                            setAerialConfig({ ...aerialConfig, orthophoto_resolution: v })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="1">1 cm</SelectItem>
+                            <SelectItem value="2">2 cm</SelectItem>
+                            <SelectItem value="3">3 cm</SelectItem>
+                            <SelectItem value="5">5 cm</SelectItem>
+                            <SelectItem value="10">10 cm</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Point Cloud Quality</Label>
+                        <Select
+                          value={aerialConfig.pc_quality}
+                          onValueChange={(v) =>
+                            setAerialConfig({ ...aerialConfig, pc_quality: v })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="lowest">Lowest</SelectItem>
+                            <SelectItem value="low">Low</SelectItem>
+                            <SelectItem value="medium">Medium</SelectItem>
+                            <SelectItem value="high">High</SelectItem>
+                            <SelectItem value="ultra">Ultra</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Feature Quality</Label>
+                        <Select
+                          value={aerialConfig.feature_quality}
+                          onValueChange={(v) =>
+                            setAerialConfig({ ...aerialConfig, feature_quality: v })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="lowest">Lowest</SelectItem>
+                            <SelectItem value="low">Low</SelectItem>
+                            <SelectItem value="medium">Medium</SelectItem>
+                            <SelectItem value="high">High</SelectItem>
+                            <SelectItem value="ultra">Ultra</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Additional ODM Options (optional)</Label>
+                      <Input
+                        placeholder="e.g., --rolling-shutter --matcher-neighbors 8"
+                        value={aerialConfig.custom_odm_options}
+                        onChange={(e) =>
+                          setAerialConfig({
+                            ...aerialConfig,
+                            custom_odm_options: e.target.value,
+                          })
+                        }
+                      />
+                      <p className="text-muted-foreground text-xs">
+                        Raw ODM CLI flags appended to the command. Overrides resolution/quality settings above.
+                      </p>
+                    </div>
+                  </>
+                )}
               </>
             )}
 
@@ -555,11 +655,10 @@ export function ProcessingPipeline() {
                     </div>
                     {pipelineType === "aerial" && (
                       <div className="flex justify-between">
-                        <span className="text-muted-foreground">
-                          Orthophoto resolution:
-                        </span>
+                        <span className="text-muted-foreground">Quality:</span>
                         <span className="font-medium">
-                          {aerialConfig.orthophoto_resolution} cm/px
+                          {ODM_PRESETS[aerialConfig.odm_preset].label}
+                          {aerialConfig.odm_preset !== "custom" && ` · ${aerialConfig.orthophoto_resolution} cm/px`}
                         </span>
                       </div>
                     )}

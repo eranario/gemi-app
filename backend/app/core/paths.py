@@ -19,7 +19,9 @@ Directory layout
 ----------------
 {data_root}/
   Raw/
-    {year}/{experiment}/{location}/{population}/{date}/{platform}/{sensor}/
+    {year}/{experiment}/{location}/{population}/{date}/{platform}/
+      Metadata/    ← platform logs (.bin/.log/.tlog) uploaded here
+      {sensor}/    ← drone images uploaded here
   Intermediate/
     {workspace_name}/
       {experiment}/{location}/{population}/          ← pipeline-level artifacts
@@ -115,6 +117,12 @@ class RunPaths:
         return self.data_root / "Raw" / self._year / self._pop_seg / self._run_seg
 
     @property
+    def raw_metadata(self) -> Path:
+        """Raw/.../Platform/Metadata/ — platform logs (.bin/.log) live here.
+        One level above sensor (platform log is shared across all sensors on that flight)."""
+        return self.raw.parent / "Metadata"
+
+    @property
     def gcp_locations_raw(self) -> Path:
         """gcp_locations.csv at the population level in Raw/ (shared across dates)."""
         return self.data_root / "Raw" / self._year / self._pop_seg / "gcp_locations.csv"
@@ -169,8 +177,13 @@ class RunPaths:
 
     @property
     def msgs_synced(self) -> Path:
-        """Ground: msgs_synced.csv updated with plot indices."""
+        """Aerial & ground: image GPS manifest (EXIF + optional drone-log correction)."""
         return self.intermediate_run / "msgs_synced.csv"
+
+    @property
+    def drone_msgs(self) -> Path:
+        """Aerial: GPS/LiDAR/attitude extracted from ArduPilot platform log."""
+        return self.intermediate_run / "drone_msgs.csv"
 
     @property
     def gcp_list(self) -> Path:

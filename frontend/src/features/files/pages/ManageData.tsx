@@ -106,7 +106,7 @@ function ManageDataTable() {
   )
 }
 
-function SyncButton() {
+function RefreshButton() {
   const queryClient = useQueryClient()
   const { showSuccessToast } = useCustomToast()
 
@@ -114,7 +114,7 @@ function SyncButton() {
     mutationFn: () => FilesService.syncFiles() as Promise<{ synced: number; removed: number }>,
     onSuccess: (data: { synced: number; removed: number }) => {
       showSuccessToast(
-        `Sync complete: ${data.synced} updated, ${data.removed} removed`,
+        `Refresh complete: ${data.synced} updated, ${data.removed} removed`,
       )
       queryClient.invalidateQueries({ queryKey: ["files"] })
     },
@@ -127,7 +127,7 @@ function SyncButton() {
       onClick={() => mutation.mutate()}
     >
       <RefreshCw className="h-4 w-4" />
-      Sync
+      Refresh
     </LoadingButton>
   )
 }
@@ -142,7 +142,7 @@ export function ManageData() {
             View and manage your uploaded data
           </p>
         </div>
-        <SyncButton />
+        <RefreshButton />
       </div>
       <ManageDataTable />
     </div>

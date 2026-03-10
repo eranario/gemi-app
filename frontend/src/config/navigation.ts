@@ -39,11 +39,6 @@ export const sidebarItems: NavItem[] = [
     icon: ChartSpline,
     title: "Analyze",
     path: "/analyze",
-    subItems: [
-      { title: "Statistics", path: "/analyze/statistics" },
-      { title: "Map View", path: "/analyze/map_view" },
-      { title: "Image Query", path: "/analyze/image_query" },
-    ],
   },
 ];
 

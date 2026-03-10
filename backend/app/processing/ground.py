@@ -440,7 +440,18 @@ def run_georeferencing(
     emit({"event": "progress", "message": "Combining plot mosaics…"})
     combine_utm_tiffs_to_mosaic(out_dir, plot_ids)
 
-    return {"georeferencing": paths.rel(out_dir)}
+    emit({"event": "progress", "message": "Building plot boundary GeoJSON…"})
+    from app.processing.geo_utils import build_plot_boundaries_geojson
+    geojson_path = build_plot_boundaries_geojson(
+        out_dir=out_dir,
+        plot_ids=plot_ids,
+        plot_borders_csv=paths.plot_borders if paths.plot_borders.exists() else None,
+    )
+
+    outputs: dict = {"georeferencing": paths.rel(out_dir)}
+    if geojson_path:
+        outputs["plot_boundaries_geojson"] = paths.rel(geojson_path)
+    return outputs
 
 
 # ── Step 4: Inference (Roboflow) ─────────────────────────────────────────────

@@ -214,6 +214,135 @@ def extract_metadata(body: dict[str, str]) -> Any:
     return result
 
 
+# ── GeoTIFF validation helpers ───────────────────────────────────────────────
+
+@router.get("/check-geotiff")
+def check_geotiff(
+    current_user: CurrentUser,
+    path: str = Query(..., description="Absolute path to the GeoTIFF"),
+) -> dict[str, Any]:
+    """
+    Read the CRS of a GeoTIFF and return whether it is WGS84 (EPSG:4326).
+    Used after orthomosaic upload to decide if conversion is needed.
+
+    Response:
+        {
+          "crs_epsg": 32614,
+          "crs_name": "WGS 84 / UTM zone 14N",
+          "is_wgs84": false,
+          "width": 1234,
+          "height": 5678,
+        }
+    """
+    src = Path(path)
+    if not src.exists() or not src.is_file():
+        raise HTTPException(status_code=404, detail=f"File not found: {path}")
+    if src.suffix.lower() not in {".tif", ".tiff"}:
+        raise HTTPException(status_code=400, detail="Not a GeoTIFF file")
+
+    try:
+        import rasterio
+
+        with rasterio.open(src) as ds:
+            crs = ds.crs
+            epsg = crs.to_epsg() if crs else None
+            return {
+                "crs_epsg": epsg,
+                "crs_name": crs.name if crs else None,
+                "is_wgs84": epsg == 4326,
+                "width": ds.width,
+                "height": ds.height,
+            }
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="rasterio is not installed — cannot check GeoTIFF CRS",
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not read GeoTIFF: {exc}")
+
+
+class ConvertGeoTiffRequest(BaseModel):
+    file_path: str
+
+
+@router.post("/convert-geotiff")
+def convert_geotiff(
+    current_user: CurrentUser,
+    body: ConvertGeoTiffRequest,
+) -> dict[str, Any]:
+    """
+    Reproject a GeoTIFF to WGS84 (EPSG:4326) in-place.
+
+    The original file is backed up with a `.original.tif` suffix before
+    conversion begins.  If conversion fails the backup is restored.
+
+    Requires rasterio.  Large files may take several seconds.
+    """
+    src_path = Path(body.file_path)
+    if not src_path.exists() or not src_path.is_file():
+        raise HTTPException(status_code=404, detail=f"File not found: {body.file_path}")
+    if src_path.suffix.lower() not in {".tif", ".tiff"}:
+        raise HTTPException(status_code=400, detail="Not a GeoTIFF file")
+
+    backup_path = src_path.with_name(src_path.stem + ".original.tif")
+    shutil.copy2(src_path, backup_path)
+
+    tmp_path = src_path.with_name(src_path.stem + ".converting.tif")
+
+    try:
+        import rasterio
+        from rasterio.crs import CRS
+        from rasterio.warp import Resampling, calculate_default_transform, reproject
+
+        dst_crs = CRS.from_epsg(4326)
+
+        with rasterio.open(src_path) as src:
+            transform, width, height = calculate_default_transform(
+                src.crs, dst_crs, src.width, src.height, *src.bounds
+            )
+            kwargs = src.meta.copy()
+            kwargs.update({"crs": dst_crs, "transform": transform, "width": width, "height": height})
+
+            with rasterio.open(tmp_path, "w", **kwargs) as dst:
+                for band in range(1, src.count + 1):
+                    reproject(
+                        source=rasterio.band(src, band),
+                        destination=rasterio.band(dst, band),
+                        src_transform=src.transform,
+                        src_crs=src.crs,
+                        dst_transform=transform,
+                        dst_crs=dst_crs,
+                        resampling=Resampling.lanczos,
+                    )
+
+        tmp_path.replace(src_path)
+        logger.info("Converted %s to WGS84; backup at %s", src_path.name, backup_path.name)
+
+        return {
+            "success": True,
+            "backup_path": str(backup_path),
+            "message": (
+                f"Converted to WGS84 (EPSG:4326). "
+                f"Original backed up as {backup_path.name}."
+            ),
+        }
+
+    except ImportError:
+        backup_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=503,
+            detail="rasterio is not installed — cannot convert GeoTIFF",
+        )
+    except Exception as exc:
+        # Restore from backup on failure
+        if backup_path.exists():
+            shutil.copy2(backup_path, src_path)
+        tmp_path.unlink(missing_ok=True)
+        logger.error("GeoTIFF conversion failed for %s: %s", src_path, exc)
+        raise HTTPException(status_code=500, detail=f"Conversion failed: {exc}")
+
+
 class LocalCopyRequest(BaseModel):
     file_paths: list[str]
     data_type: str
@@ -343,6 +472,7 @@ def _copy_local_stream(
                     "file": name,
                     "status": "completed",
                     "index": idx,
+                    "dest_path": str(dest_path),
                 }
             )
 

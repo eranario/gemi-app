@@ -8,6 +8,7 @@ Public API
 ----------
 georeference_plot(plot_index, plot_data, out_dir) → bool
 combine_utm_tiffs_to_mosaic(out_dir, plot_ids) → bool
+build_plot_boundaries_geojson(out_dir, plot_ids, plot_borders_csv) → Path | None
 """
 
 from __future__ import annotations
@@ -351,3 +352,106 @@ def combine_utm_tiffs_to_mosaic(out_dir: Path, plot_ids: list) -> bool:
 
     logger.info("Combined mosaic written: %s", combined_wgs84)
     return True
+
+
+# ── Plot boundaries GeoJSON ───────────────────────────────────────────────────
+
+def build_plot_boundaries_geojson(
+    out_dir: Path,
+    plot_ids: list,
+    plot_borders_csv: Path | None = None,
+) -> Path | None:
+    """
+    Build a WGS84 GeoJSON FeatureCollection from the footprints of georeferenced
+    plot TIFs.  Each feature is the actual (potentially rotated) plot polygon with
+    properties from plot_borders.csv (plot_id, plot label, accession).
+
+    Writes:
+        out_dir/plot_boundaries.geojson
+
+    Returns the path on success, None on failure.
+    """
+    import json
+    import rasterio
+    from pyproj import Transformer
+
+    # Load plot metadata from plot_borders.csv if present.
+    # The CSV may have columns: plot_id, Plot, Accession (and others).
+    # We use whatever is available — missing columns are simply omitted.
+    plot_meta: dict[str, dict] = {}
+    if plot_borders_csv and plot_borders_csv.exists():
+        try:
+            import csv as _csv
+            with open(plot_borders_csv, newline="") as f:
+                reader = _csv.DictReader(f)
+                for row in reader:
+                    pid = str(row.get("plot_id", "")).strip()
+                    if pid:
+                        plot_meta[pid] = {
+                            "plot":      row.get("Plot") or row.get("plot") or None,
+                            "accession": row.get("Accession") or row.get("accession") or None,
+                        }
+        except Exception:
+            logger.warning("Could not read plot_borders.csv — boundaries will have plot_id only")
+
+    features = []
+    for pid in plot_ids:
+        utm_tif = out_dir / f"georeferenced_plot_{pid}_utm.tif"
+        if not utm_tif.exists():
+            logger.warning("[Plot %s] UTM TIF not found, skipping boundary", pid)
+            continue
+
+        try:
+            with rasterio.open(str(utm_tif)) as src:
+                w, h = src.width, src.height
+                t = src.transform
+                utm_epsg = src.crs.to_epsg()
+
+                # Extract the 4 corner coordinates using the affine transform.
+                # This captures rotated plots correctly (not just axis-aligned bounds).
+                corners_utm = [
+                    t * (0, 0),
+                    t * (w, 0),
+                    t * (w, h),
+                    t * (0, h),
+                ]
+
+            transformer = Transformer.from_crs(
+                f"EPSG:{utm_epsg}", "EPSG:4326", always_xy=True
+            )
+            # always_xy=True → transform returns (lon, lat)
+            corners_wgs84 = [
+                list(transformer.transform(x, y)) for x, y in corners_utm
+            ]
+            # Close the ring
+            corners_wgs84.append(corners_wgs84[0])
+
+            meta = plot_meta.get(str(pid), {})
+            properties: dict = {"plot_id": pid}
+            if meta.get("plot"):
+                properties["plot"] = meta["plot"]
+            if meta.get("accession"):
+                properties["accession"] = meta["accession"]
+
+            features.append({
+                "type": "Feature",
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [corners_wgs84],
+                },
+                "properties": properties,
+            })
+
+        except Exception:
+            logger.warning("[Plot %s] Failed to build boundary polygon:\n%s", pid, traceback.format_exc())
+
+    if not features:
+        logger.warning("No plot boundary features built — skipping GeoJSON write")
+        return None
+
+    geojson_path = out_dir / "plot_boundaries.geojson"
+    with open(geojson_path, "w") as f:
+        json.dump({"type": "FeatureCollection", "features": features}, f)
+
+    logger.info("Wrote plot_boundaries.geojson with %d plots → %s", len(features), geojson_path)
+    return geojson_path

@@ -93,6 +93,12 @@ const GROUND_STEPS: StepDef[] = [
     kind: "compute",
   },
   {
+    key: "plot_boundaries",
+    label: "Plot Boundaries",
+    description: "Review and adjust georeferenced plot footprints overlaid on the combined mosaic",
+    kind: "interactive",
+  },
+  {
     key: "inference",
     label: "Inference",
     description: "Roboflow detection/segmentation on plot images",
@@ -101,6 +107,12 @@ const GROUND_STEPS: StepDef[] = [
 ]
 
 const AERIAL_STEPS: StepDef[] = [
+  {
+    key: "data_sync",
+    label: "Data Sync",
+    description: "Extract GPS from image EXIF and sync with platform log for accurate positioning",
+    kind: "compute",
+  },
   {
     key: "gcp_selection",
     label: "GCP Selection",
@@ -605,6 +617,29 @@ export function RunDetail() {
     executeMutation.mutate({ step })
   }
 
+  // Use uploaded orthomosaic (aerial: skip ODM)
+  const [isRegisteringOrtho, setIsRegisteringOrtho] = useState(false)
+
+  async function handleUseUploadedOrtho() {
+    setIsRegisteringOrtho(true)
+    try {
+      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/use-uploaded-ortho`), {
+        method: "POST",
+        headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: "Failed to register orthomosaic" }))
+        showErrorToast(err.detail ?? "Failed to register orthomosaic")
+        return
+      }
+      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] })
+    } catch {
+      showErrorToast("Failed to register orthomosaic")
+    } finally {
+      setIsRegisteringOrtho(false)
+    }
+  }
+
   // Download crops
   const [isDownloading, setIsDownloading] = useState(false)
   const hasCrops = !!(run?.outputs?.stitching || run?.outputs?.cropped_images || run?.outputs?.traits)
@@ -716,6 +751,30 @@ export function RunDetail() {
           </CardContent>
         </Card>
 
+        {/* Aerial: use uploaded orthomosaic instead of running ODM */}
+        {pipelineType === "aerial" && !run.steps_completed?.orthomosaic && (
+          <div className="mb-6 p-4 rounded-lg border border-dashed flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium">Skip ODM — Use Uploaded Orthomosaic</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                If you already have a GeoTIFF orthomosaic, upload it via Files → Orthomosaic
+                (same experiment/location/population/date/platform/sensor), then click here to
+                register it and skip the ODM generation step.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-shrink-0"
+              disabled={isRegisteringOrtho || isRunning}
+              onClick={handleUseUploadedOrtho}
+            >
+              {isRegisteringOrtho && <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />}
+              {isRegisteringOrtho ? "Registering…" : "Use Uploaded Orthomosaic"}
+            </Button>
+          </div>
+        )}
+
         {/* Inline interactive tools */}
         {openTool === "plot_marking" && (
           <Card className="mb-6">
@@ -762,9 +821,11 @@ export function RunDetail() {
         {openTool === "plot_boundaries" && (
           <Card className="mb-6">
             <CardHeader>
-              <CardTitle>Boundary Drawer</CardTitle>
+              <CardTitle>Plot Boundaries</CardTitle>
               <CardDescription>
-                Draw plot polygons on the orthomosaic to define field boundaries.
+                {pipelineType === "ground"
+                  ? "Review and adjust georeferenced plot footprints overlaid on the combined mosaic. Existing boundaries from georeferencing are pre-loaded."
+                  : "Draw plot polygons on the orthomosaic to define field boundaries."}
               </CardDescription>
             </CardHeader>
             <CardContent>

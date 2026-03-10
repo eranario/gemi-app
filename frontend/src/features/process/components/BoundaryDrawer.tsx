@@ -205,7 +205,7 @@ export function BoundaryDrawer({ runId, onSaved, onCancel }: BoundaryDrawerProps
     return (
       <div className="flex items-center justify-center h-64 gap-2 text-muted-foreground text-sm">
         <Loader2 className="w-5 h-5 animate-spin" />
-        Loading orthomosaic…
+        Loading mosaic…
       </div>
     )
   }
@@ -215,7 +215,7 @@ export function BoundaryDrawer({ runId, onSaved, onCancel }: BoundaryDrawerProps
       <div className="flex flex-col items-center justify-center h-64 gap-2 text-muted-foreground">
         <AlertCircle className="w-8 h-8" />
         <p className="text-sm">
-          No orthomosaic found for this run. Complete the orthomosaic generation step first.
+          No mosaic found for this run. Complete the preceding processing steps first.
         </p>
       </div>
     )
