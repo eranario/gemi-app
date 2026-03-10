@@ -8,46 +8,49 @@
  * The orthomosaic is served through the backend /files/serve endpoint so no
  * tile server is required for basic display.
  */
+// test change
 
-import "leaflet/dist/leaflet.css"
-import "@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css"
+import "leaflet/dist/leaflet.css";
+import "@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css";
 
-import { useEffect, useRef, useState } from "react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import L from "leaflet"
-import { AlertCircle, Loader2, Trash2 } from "lucide-react"
+import { useEffect, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import L from "leaflet";
+import { AlertCircle, Loader2, Trash2 } from "lucide-react";
 
-import { ProcessingService } from "@/client"
-import { Button } from "@/components/ui/button"
-import useCustomToast from "@/hooks/useCustomToast"
+import { ProcessingService } from "@/client";
+import { Button } from "@/components/ui/button";
+import useCustomToast from "@/hooks/useCustomToast";
 
 function apiUrl(path: string): string {
-  const base = (window as any).__GEMI_BACKEND_URL__ ?? ""
-  return base ? `${base}${path}` : path
+  const base = (window as any).__GEMI_BACKEND_URL__ ?? "";
+  return base ? `${base}${path}` : path;
 }
 
 // Fix Leaflet's broken default icon paths when bundled with Vite
-delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl
+delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)
+  ._getIconUrl;
 L.Icon.Default.mergeOptions({
-  iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+  iconRetinaUrl:
+    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
   iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
   shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-})
+});
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface OrthoInfo {
-  available: boolean
-  path: string | null
+  available: boolean;
+  path: string | null;
   // [[southLat, westLon], [northLat, eastLon]]
-  bounds: [[number, number], [number, number]] | null
-  existing_geojson: GeoJSON.FeatureCollection | null
+  bounds: [[number, number], [number, number]] | null;
+  existing_geojson: GeoJSON.FeatureCollection | null;
 }
 
 interface BoundaryDrawerProps {
-  runId: string
-  onSaved: () => void
-  onCancel: () => void
+  runId: string;
+  onSaved: () => void;
+  onCancel: () => void;
 }
 
 // ── Geoman layer counter ───────────────────────────────────────────────────────
@@ -61,49 +64,58 @@ function layerToFeature(layer: L.Layer): GeoJSON.Feature | null {
     layer instanceof L.CircleMarker ||
     layer instanceof L.Marker
   ) {
-    return (layer as unknown as { toGeoJSON(): GeoJSON.Feature }).toGeoJSON()
+    return (layer as unknown as { toGeoJSON(): GeoJSON.Feature }).toGeoJSON();
   }
-  return null
+  return null;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export function BoundaryDrawer({ runId, onSaved, onCancel }: BoundaryDrawerProps) {
-  const { showErrorToast } = useCustomToast()
-  const queryClient = useQueryClient()
-  const mapContainerRef = useRef<HTMLDivElement>(null)
-  const mapRef = useRef<L.Map | null>(null)
-  const overlayRef = useRef<L.ImageOverlay | null>(null)
-  const drawnLayersRef = useRef<L.FeatureGroup | null>(null)
-  const [featureCount, setFeatureCount] = useState(0)
+export function BoundaryDrawer({
+  runId,
+  onSaved,
+  onCancel,
+}: BoundaryDrawerProps) {
+  const { showErrorToast } = useCustomToast();
+  const queryClient = useQueryClient();
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const overlayRef = useRef<L.ImageOverlay | null>(null);
+  const drawnLayersRef = useRef<L.FeatureGroup | null>(null);
+  const [featureCount, setFeatureCount] = useState(0);
 
   // Fetch orthomosaic info
   const { data: orthoInfo, isLoading } = useQuery<OrthoInfo>({
     queryKey: ["orthomosaic-info", runId],
     queryFn: () =>
-      ProcessingService.orthomosaicInfo({ id: runId }) as unknown as Promise<OrthoInfo>,
-  })
+      ProcessingService.orthomosaicInfo({
+        id: runId,
+      }) as unknown as Promise<OrthoInfo>,
+  });
 
   // Save mutation
   const saveMutation = useMutation({
     mutationFn: (geojson: GeoJSON.FeatureCollection) =>
       ProcessingService.savePlotBoundaries({
         id: runId,
-        requestBody: { geojson: geojson as unknown as { [key: string]: unknown } },
+        requestBody: {
+          geojson: geojson as unknown as { [key: string]: unknown },
+        },
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] })
-      onSaved()
+      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
+      onSaved();
     },
     onError: () => showErrorToast("Failed to save plot boundaries"),
-  })
+  });
 
   // Initialise map once orthoInfo is available
   useEffect(() => {
-    if (!orthoInfo?.available || !orthoInfo.bounds || !mapContainerRef.current) return
-    if (mapRef.current) return // already initialised
+    if (!orthoInfo?.available || !orthoInfo.bounds || !mapContainerRef.current)
+      return;
+    if (mapRef.current) return; // already initialised
 
-    const bounds = L.latLngBounds(orthoInfo.bounds[0], orthoInfo.bounds[1])
+    const bounds = L.latLngBounds(orthoInfo.bounds[0], orthoInfo.bounds[1]);
 
     const map = L.map(mapContainerRef.current, {
       crs: L.CRS.EPSG3857,
@@ -111,38 +123,40 @@ export function BoundaryDrawer({ runId, onSaved, onCancel }: BoundaryDrawerProps
       zoom: 17,
       minZoom: 10,
       maxZoom: 22,
-    })
-    mapRef.current = map
+    });
+    mapRef.current = map;
 
     // Base tile layer for spatial context
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "© OpenStreetMap contributors",
       opacity: 0.4,
-    }).addTo(map)
+    }).addTo(map);
 
     // Orthomosaic as ImageOverlay served through backend
-    const imgSrc = apiUrl(`/api/v1/files/serve?path=${encodeURIComponent(orthoInfo.path!)}`)
-    const overlay = L.imageOverlay(imgSrc, bounds, { opacity: 0.9 }).addTo(map)
-    overlayRef.current = overlay
-    map.fitBounds(bounds)
+    const imgSrc = apiUrl(
+      `/api/v1/files/serve?path=${encodeURIComponent(orthoInfo.path!)}`
+    );
+    const overlay = L.imageOverlay(imgSrc, bounds, { opacity: 0.9 }).addTo(map);
+    overlayRef.current = overlay;
+    map.fitBounds(bounds);
 
     // Feature group for drawn layers
-    const drawnLayers = new L.FeatureGroup()
-    drawnLayersRef.current = drawnLayers
-    drawnLayers.addTo(map)
+    const drawnLayers = new L.FeatureGroup();
+    drawnLayersRef.current = drawnLayers;
+    drawnLayers.addTo(map);
 
     // Load existing boundaries if present
     if (orthoInfo.existing_geojson) {
       const existing = L.geoJSON(orthoInfo.existing_geojson, {
         style: { color: "#2563eb", weight: 2, fillOpacity: 0.15 },
-      })
-      existing.eachLayer((l) => drawnLayers.addLayer(l))
-      setFeatureCount(orthoInfo.existing_geojson.features?.length ?? 0)
+      });
+      existing.eachLayer((l) => drawnLayers.addLayer(l));
+      setFeatureCount(orthoInfo.existing_geojson.features?.length ?? 0);
     }
 
     // Enable Geoman drawing controls (polygon only)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const mapAny = map as any
+    const mapAny = map as any;
     if (mapAny.pm) {
       mapAny.pm.addControls({
         position: "topleft",
@@ -158,76 +172,78 @@ export function BoundaryDrawer({ runId, onSaved, onCancel }: BoundaryDrawerProps
         cutPolygon: false,
         removalMode: true,
         rotateMode: false,
-      })
+      });
 
       // Style drawn layers consistently
       mapAny.pm.setGlobalOptions({
         layerGroup: drawnLayers,
         pathOptions: { color: "#2563eb", weight: 2, fillOpacity: 0.15 },
-      })
+      });
 
       // Update feature count whenever a layer is created, edited, or removed
       const refresh = () => {
-        setFeatureCount(drawnLayers.getLayers().length)
-      }
-      map.on("pm:create", refresh)
-      map.on("pm:remove", refresh)
-      map.on("pm:edit", refresh)
+        setFeatureCount(drawnLayers.getLayers().length);
+      };
+      map.on("pm:create", refresh);
+      map.on("pm:remove", refresh);
+      map.on("pm:edit", refresh);
     }
 
     return () => {
-      map.remove()
-      mapRef.current = null
-    }
-  }, [orthoInfo])
+      map.remove();
+      mapRef.current = null;
+    };
+  }, [orthoInfo]);
 
   const handleClearAll = () => {
-    drawnLayersRef.current?.clearLayers()
-    setFeatureCount(0)
-  }
+    drawnLayersRef.current?.clearLayers();
+    setFeatureCount(0);
+  };
 
   const handleSave = () => {
-    const layers = drawnLayersRef.current?.getLayers() ?? []
+    const layers = drawnLayersRef.current?.getLayers() ?? [];
     const features: GeoJSON.Feature[] = layers
       .map(layerToFeature)
-      .filter((f): f is GeoJSON.Feature => f !== null)
+      .filter((f): f is GeoJSON.Feature => f !== null);
 
     const geojson: GeoJSON.FeatureCollection = {
       type: "FeatureCollection",
       features,
-    }
-    saveMutation.mutate(geojson)
-  }
+    };
+    saveMutation.mutate(geojson);
+  };
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-64 gap-2 text-muted-foreground text-sm">
-        <Loader2 className="w-5 h-5 animate-spin" />
+      <div className="text-muted-foreground flex h-64 items-center justify-center gap-2 text-sm">
+        <Loader2 className="h-5 w-5 animate-spin" />
         Loading mosaic…
       </div>
-    )
+    );
   }
 
   if (!orthoInfo?.available) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 gap-2 text-muted-foreground">
-        <AlertCircle className="w-8 h-8" />
+      <div className="text-muted-foreground flex h-64 flex-col items-center justify-center gap-2">
+        <AlertCircle className="h-8 w-8" />
         <p className="text-sm">
-          No mosaic found for this run. Complete the preceding processing steps first.
+          No mosaic found for this run. Complete the preceding processing steps
+          first.
         </p>
       </div>
-    )
+    );
   }
 
   return (
     <div className="space-y-3">
       {/* Toolbar */}
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
+        <p className="text-muted-foreground text-sm">
           Draw polygons on the map to define plot boundaries.{" "}
-          <span className="font-medium text-foreground">{featureCount}</span> polygon
+          <span className="text-foreground font-medium">{featureCount}</span>{" "}
+          polygon
           {featureCount !== 1 ? "s" : ""} drawn.
         </p>
         <Button
@@ -236,7 +252,7 @@ export function BoundaryDrawer({ runId, onSaved, onCancel }: BoundaryDrawerProps
           onClick={handleClearAll}
           disabled={featureCount === 0}
         >
-          <Trash2 className="w-3 h-3 mr-1" />
+          <Trash2 className="mr-1 h-3 w-3" />
           Clear All
         </Button>
       </div>
@@ -244,7 +260,7 @@ export function BoundaryDrawer({ runId, onSaved, onCancel }: BoundaryDrawerProps
       {/* Map */}
       <div
         ref={mapContainerRef}
-        className="w-full rounded-lg overflow-hidden border"
+        className="w-full overflow-hidden rounded-lg border"
         style={{ height: 520 }}
       />
 
@@ -262,5 +278,5 @@ export function BoundaryDrawer({ runId, onSaved, onCancel }: BoundaryDrawerProps
         </Button>
       </div>
     </div>
-  )
+  );
 }

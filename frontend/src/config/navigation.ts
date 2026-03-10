@@ -4,7 +4,7 @@ import {
   Home,
   type LucideIcon,
   Play,
-  Users,
+  Settings,
 } from "lucide-react";
 
 export type SubItem = {
@@ -40,8 +40,5 @@ export const sidebarItems: NavItem[] = [
     title: "Analyze",
     path: "/analyze",
   },
-];
-
-export const adminItems: NavItem[] = [
-  { icon: Users, title: "Admin", path: "/admin" },
+  { icon: Settings, title: "Settings", path: "/settings" },
 ];

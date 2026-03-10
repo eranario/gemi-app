@@ -254,6 +254,7 @@ def run_orthomosaic(
     # Monitor log file for progress while ODM runs
     stage_count = len(_ODM_PROGRESS_STAGES)
     current_stage = -1
+    log_offset = 0  # byte position — only read new content each cycle
 
     try:
         while proc.poll() is None:
@@ -265,14 +266,26 @@ def run_orthomosaic(
                     pass
                 return {}
 
-            # Scan log for progress
             try:
-                text = log_file.read_text()
-                for idx, stage in enumerate(_ODM_PROGRESS_STAGES):
-                    if stage in text and idx > current_stage:
-                        current_stage = idx
-                        pct = round((idx + 1) / stage_count * 80)  # cap at 80% during ODM
-                        emit({"event": "progress", "message": stage, "progress": pct})
+                with open(log_file, "r", errors="replace") as lf:
+                    lf.seek(log_offset)
+                    new_text = lf.read()
+                    log_offset = lf.tell()
+
+                if new_text:
+                    # Emit each new non-empty line as a raw log event
+                    for line in new_text.splitlines():
+                        line = line.strip()
+                        if line:
+                            emit({"event": "log", "message": line})
+
+                    # Check for stage transitions in the full log so far
+                    full_text = log_file.read_text(errors="replace")
+                    for idx, stage in enumerate(_ODM_PROGRESS_STAGES):
+                        if stage in full_text and idx > current_stage:
+                            current_stage = idx
+                            pct = round((idx + 1) / stage_count * 80)
+                            emit({"event": "progress", "message": stage, "progress": pct})
             except OSError:
                 pass
 

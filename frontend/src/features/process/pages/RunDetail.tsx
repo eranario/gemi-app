@@ -251,31 +251,55 @@ function getNextStep(
 
 function ProgressLog({ events }: { events: ProgressEvent[] }) {
   const ref = useRef<HTMLDivElement>(null)
+  const [showRaw, setShowRaw] = useState(false)
+
+  const visibleEvents = showRaw ? events : events.filter((e) => e.event !== "log")
+
   useEffect(() => {
     ref.current?.scrollTo({ top: ref.current.scrollHeight, behavior: "smooth" })
-  }, [events])
+  }, [visibleEvents])
 
   if (events.length === 0) return null
 
+  const hasLogs = events.some((e) => e.event === "log")
+
   return (
-    <div
-      ref={ref}
-      className="mt-3 max-h-36 overflow-y-auto rounded-md bg-muted/60 p-3 space-y-0.5 text-xs font-mono"
-    >
-      {events.map((e, i) => (
-        <div
-          key={i}
-          className={
-            e.event === "error"
-              ? "text-red-600"
-              : e.event === "complete"
-                ? "text-green-600"
-                : "text-muted-foreground"
-          }
+    <div className="mt-3 space-y-1">
+      {hasLogs && (
+        <button
+          type="button"
+          onClick={() => setShowRaw((v) => !v)}
+          className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
         >
-          [{e.event}] {e.message ?? e.step ?? JSON.stringify(e)}
-        </div>
-      ))}
+          <ChevronRight className={`w-3 h-3 transition-transform ${showRaw ? "rotate-90" : ""}`} />
+          {showRaw ? "Hide" : "Show"} raw output
+        </button>
+      )}
+      <div
+        ref={ref}
+        className="max-h-48 overflow-y-auto rounded-md bg-muted/60 p-3 space-y-0.5 text-xs font-mono"
+      >
+        {visibleEvents.map((e, i) => (
+          <div
+            key={i}
+            className={
+              e.event === "error"
+                ? "text-red-500"
+                : e.event === "complete"
+                  ? "text-green-500"
+                  : e.event === "log"
+                    ? "text-muted-foreground/60"
+                    : "text-foreground"
+            }
+          >
+            {e.event === "log"
+              ? e.message
+              : e.event === "progress"
+                ? `▶ ${e.message}`
+                : `[${e.event}] ${e.message ?? e.step ?? JSON.stringify(e)}`}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
