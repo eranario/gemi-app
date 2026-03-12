@@ -78,19 +78,20 @@ def save_gcp_selection(
     paths = _get_paths(session, run_id)
     paths.intermediate_run.mkdir(parents=True, exist_ok=True)
 
-    # Save gcp_list.txt (ODM format: lat lon alt pixel_x pixel_y image)
+    # Save gcp_list.txt (ODM format: EPSG:4326 header, then lon lat alt pixel_x pixel_y image label)
     with open(paths.gcp_list, "w") as f:
-        f.write("WGS84\n")
+        f.write("EPSG:4326\n")
         for sel in gcp_selections:
             f.write(
-                f"{sel['lat']} {sel['lon']} {sel['alt']} "
-                f"{sel['pixel_x']} {sel['pixel_y']} {sel['image']}\n"
+                f"{sel['lon']} {sel['lat']} {sel['alt']} "
+                f"{sel['pixel_x']} {sel['pixel_y']} {sel['image']} {sel['label']}\n"
             )
 
-    # Save geo.txt (ODM format: image lat lon alt)
+    # Save geo.txt (ODM format: SRS header on line 1, then image lon lat alt)
     with open(paths.geo_txt, "w") as f:
+        f.write("EPSG:4326\n")
         for img in image_gps:
-            f.write(f"{img['image']} {img['lat']} {img['lon']} {img['alt']}\n")
+            f.write(f"{img['image']} {img['lon']} {img['lat']} {img['alt']}\n")
 
     # Save inline gcp_locations.csv if provided
     if gcp_locations_csv:
@@ -187,22 +188,58 @@ def run_orthomosaic(
     image_dir = _find_image_dir(paths)
 
     # ODM project layout: odm_working_dir/project/code/
+    # Clear previous ODM working directory on re-run to avoid stale state.
+    # Docker runs as root so the dir may be root-owned — fall back to a Docker
+    # container to delete it if shutil.rmtree gets a PermissionError.
+    if paths.odm_working_dir.exists():
+        try:
+            shutil.rmtree(paths.odm_working_dir)
+        except PermissionError:
+            logger.warning("Permission denied removing %s — using Docker to clean up", paths.odm_working_dir)
+            subprocess.run(
+                ["docker", "run", "--rm",
+                 "-v", f"{paths.odm_working_dir}:/target",
+                 "alpine", "rm", "-rf", "/target"],
+                timeout=60, capture_output=True,
+            )
+            if paths.odm_working_dir.exists():
+                shutil.rmtree(paths.odm_working_dir)
+        logger.info("Cleared previous ODM working directory: %s", paths.odm_working_dir)
+
     odm_project = paths.odm_working_dir / "project"
     odm_code = odm_project / "code"
     odm_code.mkdir(parents=True, exist_ok=True)
     paths.processed_run.mkdir(parents=True, exist_ok=True)
 
-    # Copy gcp_list.txt and geo.txt into the ODM project
+    # Determine next version number from existing run outputs
+    from app.models.pipeline import PipelineRun as _PipelineRun
+    _run = session.get(_PipelineRun, run_id)
+    _existing_orthos = (_run.outputs or {}).get("orthomosaics", []) if _run else []
+    # Backward-compat: old flat "orthomosaic" key treated as v1
+    if not _existing_orthos and _run and (_run.outputs or {}).get("orthomosaic"):
+        _existing_orthos = [{"version": 1}]
+    next_version = max((o["version"] for o in _existing_orthos), default=0) + 1
+
+    # Copy gcp_list.txt into the ODM project, patching SRS header if needed
     gcp_dest = odm_code / "gcp_list.txt"
-    with open(paths.gcp_list) as f:
-        lines = f.readlines()
-    if len(lines) >= 2:
-        shutil.copy2(paths.gcp_list, gcp_dest)
+    gcp_lines = paths.gcp_list.read_text().splitlines()
+    if len(gcp_lines) >= 2:
+        first = gcp_lines[0].strip()
+        if first.lower() == "wgs84" or (first and not first.startswith("EPSG:") and not first.startswith("+proj")):
+            logger.warning("gcp_list.txt has invalid SRS header '%s' — replacing with EPSG:4326", first)
+            gcp_lines[0] = "EPSG:4326"
+        gcp_dest.write_text("\n".join(gcp_lines) + "\n")
         logger.info("Copied gcp_list.txt to ODM project")
 
     geo_dest = odm_code / "geo.txt"
     if paths.geo_txt.exists():
-        shutil.copy2(paths.geo_txt, geo_dest)
+        geo_lines = paths.geo_txt.read_text().splitlines()
+        # Ensure first line is a valid SRS header (not an image filename)
+        first = geo_lines[0].strip() if geo_lines else ""
+        if first and not first.startswith("EPSG:") and first.lower() != "wgs84" and not first.startswith("+proj"):
+            logger.warning("geo.txt missing SRS header — prepending EPSG:4326")
+            geo_lines.insert(0, "EPSG:4326")
+        geo_dest.write_text("\n".join(geo_lines) + "\n")
 
     # Log file inside project dir (ODM writes its own logs; we create one)
     log_file = odm_code / "logs.txt"
@@ -215,7 +252,9 @@ def run_orthomosaic(
     host_images = str(image_dir).replace(container_data_root, host_data_root)
 
     # Build ODM options
-    odm_options = "--dsm"
+    # --skip-report avoids a NumPy 2.x / GDAL incompatibility in the ODM
+    # report stage that causes a non-fatal crash after the orthomosaic is done.
+    odm_options = "--dsm --skip-report"
     if custom_odm_options:
         odm_options += f" {custom_odm_options}"
     else:
@@ -233,11 +272,17 @@ def run_orthomosaic(
         "--name", container_name,
         "-i", "--rm",
         "--security-opt=no-new-privileges",
+        "--user", f"{os.getuid()}:{os.getgid()}",
+        "-w", "/datasets",
         "-v", f"{host_project}:/datasets:rw",
         "-v", f"{host_images}:/datasets/code/images:ro",
-        "-v", "/etc/timezone:/etc/timezone:ro",
-        "-v", "/etc/localtime:/etc/localtime:ro",
     ]
+    # Only mount timezone files if they exist as regular files (not present on all distros)
+    from pathlib import Path as _Path
+    if _Path("/etc/timezone").is_file():
+        docker_cmd += ["-v", "/etc/timezone:/etc/timezone:ro"]
+    if _Path("/etc/localtime").exists():
+        docker_cmd += ["-v", "/etc/localtime:/etc/localtime:ro"]
     if _check_gpu():
         docker_cmd += ["--gpus", "all", "opendronemap/odm:gpu"]
     else:
@@ -291,8 +336,21 @@ def run_orthomosaic(
 
             time.sleep(10)
 
+        # Flush any remaining log lines written after the last sleep cycle
+        # (also catches output from processes that exit immediately)
+        try:
+            with open(log_file, "r", errors="replace") as lf:
+                lf.seek(log_offset)
+                remaining = lf.read()
+            for line in remaining.splitlines():
+                line = line.strip()
+                if line:
+                    emit({"event": "log", "message": line})
+        except OSError:
+            pass
+
         if proc.returncode != 0:
-            raise RuntimeError(f"ODM exited with code {proc.returncode}. Check {log_file}.")
+            raise RuntimeError(f"ODM exited with code {proc.returncode}. See raw output above for details.")
 
     except Exception:
         try:
@@ -310,33 +368,49 @@ def run_orthomosaic(
     if not ortho_src.exists():
         raise FileNotFoundError(f"ODM orthomosaic not found at {ortho_src}")
 
-    shutil.copy2(ortho_src, paths.aerial_rgb)
-    logger.info("Copied orthomosaic → %s", paths.aerial_rgb.name)
+    rgb_dest = paths.aerial_rgb_versioned(next_version)
+    pyramid_dest = paths.aerial_rgb_pyramid_versioned(next_version)
+    dem_dest = paths.aerial_dem_versioned(next_version)
+
+    shutil.copy2(ortho_src, rgb_dest)
+    logger.info("Copied orthomosaic → %s", rgb_dest.name)
 
     emit({"event": "progress", "message": "Generating pyramid (COG)…", "progress": 88})
 
-    # Build pyramid using rasterio (overview levels)
+    pyramid_ok = False
     try:
         import rasterio
         from rasterio.enums import Resampling as _Resampling
 
-        shutil.copy2(ortho_src, paths.aerial_rgb_pyramid)
-        with rasterio.open(paths.aerial_rgb_pyramid, "r+") as dst:
+        shutil.copy2(ortho_src, pyramid_dest)
+        with rasterio.open(pyramid_dest, "r+") as dst:
             dst.build_overviews([2, 4, 8, 16], _Resampling.average)
             dst.update_tags(ns="rio_overview", resampling="average")
-        logger.info("Built pyramid → %s", paths.aerial_rgb_pyramid.name)
+        logger.info("Built pyramid → %s", pyramid_dest.name)
+        pyramid_ok = True
     except Exception as exc:
         logger.warning("Pyramid generation failed (non-fatal): %s", exc)
 
+    dem_ok = False
     if dem_src.exists():
-        shutil.copy2(dem_src, paths.aerial_dem)
-        logger.info("Copied DEM → %s", paths.aerial_dem.name)
+        shutil.copy2(dem_src, dem_dest)
+        logger.info("Copied DEM → %s", dem_dest.name)
+        dem_ok = True
 
     emit({"event": "progress", "message": "Orthomosaic complete.", "progress": 100})
 
+    from datetime import datetime as _dt, timezone as _tz
+    new_entry = {
+        "version": next_version,
+        "rgb": paths.rel(rgb_dest),
+        "dem": paths.rel(dem_dest) if dem_ok else None,
+        "pyramid": paths.rel(pyramid_dest) if pyramid_ok else None,
+        "created_at": _dt.now(_tz.utc).isoformat(),
+    }
+
     return {
-        "orthomosaic": paths.rel(paths.aerial_rgb),
-        "dem": paths.rel(paths.aerial_dem) if paths.aerial_dem.exists() else None,
+        "_ortho_new_entry": new_entry,
+        "active_ortho_version": next_version,
         "odm_log": paths.rel(log_file),
     }
 
@@ -450,12 +524,28 @@ def run_trait_extraction(
     import rasterio
     from rasterio.windows import from_bounds as _from_bounds
 
+    from app.models.pipeline import PipelineRun as _PipelineRun
+    _run = session.get(_PipelineRun, run_id)
     paths = _get_paths(session, run_id)
 
-    if not paths.aerial_rgb.exists():
+    # Resolve active orthomosaic path from versioned outputs
+    _outputs = (_run.outputs or {}) if _run else {}
+    _active_v = _outputs.get("active_ortho_version")
+    _orthos = _outputs.get("orthomosaics", [])
+    _active = next((o for o in _orthos if o["version"] == _active_v), None)
+    if _active:
+        aerial_rgb = paths.abs(_active["rgb"])
+        aerial_dem = paths.abs(_active["dem"]) if _active.get("dem") else None
+    else:
+        # Backward-compat: old flat "orthomosaic" key
+        _legacy = _outputs.get("orthomosaic")
+        aerial_rgb = paths.abs(_legacy) if _legacy else paths.aerial_rgb
+        aerial_dem = paths.aerial_dem if paths.aerial_dem.exists() else None
+
+    if not aerial_rgb.exists():
         raise FileNotFoundError(
-            f"Orthomosaic not found at {paths.aerial_rgb}. "
-            "Complete the Orthomosaic step first."
+            f"Active orthomosaic not found at {aerial_rgb}. "
+            "Complete the Orthomosaic step or activate a version first."
         )
     if not paths.plot_boundary_geojson.exists():
         raise FileNotFoundError(
@@ -471,10 +561,10 @@ def run_trait_extraction(
     emit({"event": "progress", "message": f"Extracting traits for {n_plots} plots…",
           "total": n_plots})
 
-    has_dem = paths.aerial_dem.exists()
+    has_dem = aerial_dem is not None and aerial_dem.exists()
     records: list[dict] = []
 
-    with rasterio.open(paths.aerial_rgb) as rgb_src:
+    with rasterio.open(aerial_rgb) as rgb_src:
         # Reproject boundaries to raster CRS
         if gdf.crs is None:
             gdf = gdf.set_crs("EPSG:4326")
@@ -483,7 +573,7 @@ def run_trait_extraction(
         else:
             gdf_raster = gdf
 
-        dem_src = rasterio.open(paths.aerial_dem) if has_dem else None
+        dem_src = rasterio.open(aerial_dem) if has_dem else None
         if dem_src is not None and dem_src.crs != rgb_src.crs:
             gdf_dem = gdf.to_crs(dem_src.crs)
         elif dem_src is not None:

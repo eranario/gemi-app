@@ -37,6 +37,7 @@ export function useFileUpload() {
       }));
 
       const processId = addProcess({
+        type: "file_upload",
         status: "running",
         title: `Uploading ${filePaths.length} file(s)`,
         items,

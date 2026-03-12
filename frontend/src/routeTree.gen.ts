@@ -25,6 +25,7 @@ import { Route as LayoutFilesUpload_dataRouteImport } from './routes/_layout/fil
 import { Route as LayoutFilesManage_dataRouteImport } from './routes/_layout/files/manage_data'
 import { Route as LayoutAnalyzeRunIdRouteImport } from './routes/_layout/analyze/$runId'
 import { Route as LayoutProcessWorkspaceIdIndexRouteImport } from './routes/_layout/process/$workspaceId/index'
+import { Route as LayoutProcessWorkspaceIdToolRouteImport } from './routes/_layout/process/$workspaceId/tool'
 import { Route as LayoutProcessWorkspaceIdPipelineRouteImport } from './routes/_layout/process/$workspaceId/pipeline'
 import { Route as LayoutProcessWorkspaceIdRunRunIdRouteImport } from './routes/_layout/process/$workspaceId/run/$runId'
 
@@ -109,6 +110,12 @@ const LayoutProcessWorkspaceIdIndexRoute =
     path: '/',
     getParentRoute: () => LayoutProcessWorkspaceIdRoute,
   } as any)
+const LayoutProcessWorkspaceIdToolRoute =
+  LayoutProcessWorkspaceIdToolRouteImport.update({
+    id: '/tool',
+    path: '/tool',
+    getParentRoute: () => LayoutProcessWorkspaceIdRoute,
+  } as any)
 const LayoutProcessWorkspaceIdPipelineRoute =
   LayoutProcessWorkspaceIdPipelineRouteImport.update({
     id: '/pipeline',
@@ -138,6 +145,7 @@ export interface FileRoutesByFullPath {
   '/analyze': typeof LayoutAnalyzeIndexRoute
   '/process': typeof LayoutProcessIndexRoute
   '/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
+  '/process/$workspaceId/tool': typeof LayoutProcessWorkspaceIdToolRoute
   '/process/$workspaceId/': typeof LayoutProcessWorkspaceIdIndexRoute
   '/process/$workspaceId/run/$runId': typeof LayoutProcessWorkspaceIdRunRunIdRoute
 }
@@ -156,6 +164,7 @@ export interface FileRoutesByTo {
   '/analyze': typeof LayoutAnalyzeIndexRoute
   '/process': typeof LayoutProcessIndexRoute
   '/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
+  '/process/$workspaceId/tool': typeof LayoutProcessWorkspaceIdToolRoute
   '/process/$workspaceId': typeof LayoutProcessWorkspaceIdIndexRoute
   '/process/$workspaceId/run/$runId': typeof LayoutProcessWorkspaceIdRunRunIdRoute
 }
@@ -177,6 +186,7 @@ export interface FileRoutesById {
   '/_layout/analyze/': typeof LayoutAnalyzeIndexRoute
   '/_layout/process/': typeof LayoutProcessIndexRoute
   '/_layout/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
+  '/_layout/process/$workspaceId/tool': typeof LayoutProcessWorkspaceIdToolRoute
   '/_layout/process/$workspaceId/': typeof LayoutProcessWorkspaceIdIndexRoute
   '/_layout/process/$workspaceId/run/$runId': typeof LayoutProcessWorkspaceIdRunRunIdRoute
 }
@@ -198,6 +208,7 @@ export interface FileRouteTypes {
     | '/analyze'
     | '/process'
     | '/process/$workspaceId/pipeline'
+    | '/process/$workspaceId/tool'
     | '/process/$workspaceId/'
     | '/process/$workspaceId/run/$runId'
   fileRoutesByTo: FileRoutesByTo
@@ -216,6 +227,7 @@ export interface FileRouteTypes {
     | '/analyze'
     | '/process'
     | '/process/$workspaceId/pipeline'
+    | '/process/$workspaceId/tool'
     | '/process/$workspaceId'
     | '/process/$workspaceId/run/$runId'
   id:
@@ -236,6 +248,7 @@ export interface FileRouteTypes {
     | '/_layout/analyze/'
     | '/_layout/process/'
     | '/_layout/process/$workspaceId/pipeline'
+    | '/_layout/process/$workspaceId/tool'
     | '/_layout/process/$workspaceId/'
     | '/_layout/process/$workspaceId/run/$runId'
   fileRoutesById: FileRoutesById
@@ -362,6 +375,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutProcessWorkspaceIdIndexRouteImport
       parentRoute: typeof LayoutProcessWorkspaceIdRoute
     }
+    '/_layout/process/$workspaceId/tool': {
+      id: '/_layout/process/$workspaceId/tool'
+      path: '/tool'
+      fullPath: '/process/$workspaceId/tool'
+      preLoaderRoute: typeof LayoutProcessWorkspaceIdToolRouteImport
+      parentRoute: typeof LayoutProcessWorkspaceIdRoute
+    }
     '/_layout/process/$workspaceId/pipeline': {
       id: '/_layout/process/$workspaceId/pipeline'
       path: '/pipeline'
@@ -381,6 +401,7 @@ declare module '@tanstack/react-router' {
 
 interface LayoutProcessWorkspaceIdRouteChildren {
   LayoutProcessWorkspaceIdPipelineRoute: typeof LayoutProcessWorkspaceIdPipelineRoute
+  LayoutProcessWorkspaceIdToolRoute: typeof LayoutProcessWorkspaceIdToolRoute
   LayoutProcessWorkspaceIdIndexRoute: typeof LayoutProcessWorkspaceIdIndexRoute
   LayoutProcessWorkspaceIdRunRunIdRoute: typeof LayoutProcessWorkspaceIdRunRunIdRoute
 }
@@ -389,6 +410,7 @@ const LayoutProcessWorkspaceIdRouteChildren: LayoutProcessWorkspaceIdRouteChildr
   {
     LayoutProcessWorkspaceIdPipelineRoute:
       LayoutProcessWorkspaceIdPipelineRoute,
+    LayoutProcessWorkspaceIdToolRoute: LayoutProcessWorkspaceIdToolRoute,
     LayoutProcessWorkspaceIdIndexRoute: LayoutProcessWorkspaceIdIndexRoute,
     LayoutProcessWorkspaceIdRunRunIdRoute:
       LayoutProcessWorkspaceIdRunRunIdRoute,

@@ -252,18 +252,30 @@ class RunPaths:
 
     @property
     def aerial_rgb(self) -> Path:
-        """Aerial: {date}-RGB.tif orthomosaic."""
+        """Aerial: {date}-RGB.tif orthomosaic (legacy unversioned path)."""
         return self.processed_run / f"{self.date}-RGB.tif"
 
     @property
     def aerial_dem(self) -> Path:
-        """Aerial: {date}-DEM.tif digital elevation model."""
+        """Aerial: {date}-DEM.tif digital elevation model (legacy unversioned path)."""
         return self.processed_run / f"{self.date}-DEM.tif"
 
     @property
     def aerial_rgb_pyramid(self) -> Path:
-        """Aerial: {date}-RGB-Pyramid.tif (COG for map display)."""
+        """Aerial: {date}-RGB-Pyramid.tif (legacy unversioned path)."""
         return self.processed_run / f"{self.date}-RGB-Pyramid.tif"
+
+    def aerial_rgb_versioned(self, version: int) -> Path:
+        """Aerial: {date}-RGB-v{N}.tif"""
+        return self.processed_run / f"{self.date}-RGB-v{version}.tif"
+
+    def aerial_dem_versioned(self, version: int) -> Path:
+        """Aerial: {date}-DEM-v{N}.tif"""
+        return self.processed_run / f"{self.date}-DEM-v{version}.tif"
+
+    def aerial_rgb_pyramid_versioned(self, version: int) -> Path:
+        """Aerial: {date}-RGB-Pyramid-v{N}.tif"""
+        return self.processed_run / f"{self.date}-RGB-Pyramid-v{version}.tif"
 
     @property
     def cropped_images_dir(self) -> Path:

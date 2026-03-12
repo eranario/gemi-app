@@ -141,14 +141,16 @@ def generate_plot_grid(
     cols       = int(options["columns"])
     angle      = float(options.get("angle", 0))
 
-    total_w = cols * (width_deg + hspace_deg) - hspace_deg
-    total_h = rows * (length_deg + vspace_deg) - vspace_deg
+    # Anchor grid to top-left of the boundary bounding box
+    ring = main_geom["coordinates"][0]
+    min_lon = min(p[0] for p in ring)
+    max_lat = max(p[1] for p in ring)
 
     features: list[dict[str, Any]] = []
     for i in range(rows):
         for j in range(cols):
-            x = cx - total_w / 2 + j * (width_deg + hspace_deg)
-            y = cy + total_h / 2 - i * (length_deg + vspace_deg) - length_deg
+            x = min_lon + j * (width_deg + hspace_deg)
+            y = max_lat - i * (length_deg + vspace_deg) - length_deg
 
             ring = [
                 [x,              y],

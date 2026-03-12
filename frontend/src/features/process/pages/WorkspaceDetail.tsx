@@ -94,17 +94,16 @@ function NewRunDialog({
     enabled: open,
   });
 
-  // Filter to uploads that match the pipeline type
-  // Ground pipelines work with ground/Amiga data, aerial with drone data
-  const uploads = (uploadsData?.data ?? []).filter((u: FileUploadPublic) =>
-    pipeline.type === "ground"
-      ? u.data_type === "ground" || u.platform?.toLowerCase().includes("amiga")
-      : u.data_type === "aerial" || u.data_type === "drone"
-  );
+  // Show only data types that can actually be processed by each pipeline type.
+  // Platform Logs, Weather Data, Field Design etc. are support files, not inputs.
+  const AERIAL_TYPES = new Set(["Image Data", "Orthomosaic"])
+  const GROUND_TYPES = new Set(["Farm-ng Binary File", "Image Data"])
 
-  // If filtering leaves nothing, show all uploads
-  const displayUploads =
-    uploads.length > 0 ? uploads : (uploadsData?.data ?? []);
+  const displayUploads = (uploadsData?.data ?? []).filter((u: FileUploadPublic) =>
+    pipeline.type === "aerial"
+      ? AERIAL_TYPES.has(u.data_type)
+      : GROUND_TYPES.has(u.data_type)
+  );
 
   const selectedUpload = displayUploads.find(
     (u: FileUploadPublic) => u.id === selectedUploadId

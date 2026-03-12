@@ -11,20 +11,24 @@ import {
   Square,
   Download,
   Eye,
-} from "lucide-react"
-import { useNavigate, useParams } from "@tanstack/react-router"
-import { useCallback, useEffect, useRef, useState } from "react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Button } from "@/components/ui/button"
+  TriangleAlert,
+  Star,
+  Trash2,
+  Layers,
+} from "lucide-react";
+import { useNavigate, useParams } from "@tanstack/react-router";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Progress } from "@/components/ui/progress"
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import {
   Table,
   TableBody,
@@ -32,7 +36,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table"
+} from "@/components/ui/table";
 import {
   ProcessingService,
   PipelinesService,
@@ -40,7 +44,7 @@ import {
   UtilsService,
   type PipelineRunPublic,
   type PipelinePublic,
-} from "@/client"
+} from "@/client";
 import {
   Dialog,
   DialogContent,
@@ -48,53 +52,55 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
-import useCustomToast from "@/hooks/useCustomToast"
+} from "@/components/ui/dialog";
+import useCustomToast from "@/hooks/useCustomToast";
+import { useProcess } from "@/contexts/ProcessContext";
 
 // Resolve a relative /api path to an absolute URL using the backend base
 // injected by the Tauri sidecar, or fall back to a same-origin relative path.
 function apiUrl(path: string): string {
-  const base = (window as any).__GEMI_BACKEND_URL__ ?? ""
-  return base ? `${base}${path}` : path
+  const base = (window as any).__GEMI_BACKEND_URL__ ?? "";
+  return base ? `${base}${path}` : path;
 }
-import { GcpPicker } from "@/features/process/components/GcpPicker"
-import { PlotBoundaryPrep } from "@/features/process/components/PlotBoundaryPrep"
-import { InferenceTool, type InferenceRunConfig } from "@/features/process/components/InferenceTool"
 
 // ── Step definitions ──────────────────────────────────────────────────────────
 
-type StepKind = "interactive" | "compute" | "optional"
+type StepKind = "interactive" | "compute" | "optional";
 
 interface StepDef {
-  key: string
-  label: string
-  description: string
-  kind: StepKind
+  key: string;
+  label: string;
+  description: string;
+  kind: StepKind;
 }
 
 const GROUND_STEPS: StepDef[] = [
   {
     key: "stitching",
     label: "Stitching",
-    description: "AgRowStitch stitches images per plot into panoramic mosaics and creates a combined mosaic",
+    description:
+      "AgRowStitch stitches images per plot into panoramic mosaics and creates a combined mosaic",
     kind: "compute",
   },
   {
     key: "georeferencing",
     label: "Georeferencing",
-    description: "GPS-based georeferencing of stitched plots and combined mosaic",
+    description:
+      "GPS-based georeferencing of stitched plots and combined mosaic",
     kind: "compute",
   },
   {
     key: "plot_boundary_prep",
     label: "Plot Boundary Prep",
-    description: "Draw the outer field boundary, configure plot grid dimensions, and auto-generate plot polygons from field design",
+    description:
+      "Draw the outer field boundary, configure plot grid dimensions, and auto-generate plot polygons from field design",
     kind: "interactive",
   },
   {
     key: "associate_boundaries",
     label: "Associate Boundaries",
-    description: "Match each stitched plot to its boundary polygon using GPS containment",
+    description:
+      "Match each stitched plot to its boundary polygon using GPS containment",
     kind: "compute",
   },
   {
@@ -103,20 +109,22 @@ const GROUND_STEPS: StepDef[] = [
     description: "Roboflow detection/segmentation on plot images",
     kind: "interactive",
   },
-]
+];
 
 const AERIAL_STEPS: StepDef[] = [
   {
     key: "data_sync",
     label: "Data Sync",
-    description: "Extract GPS from image EXIF and sync with platform log for accurate positioning",
+    description:
+      "Extract GPS from image EXIF and sync with platform log for accurate positioning",
     kind: "compute",
   },
   {
     key: "gcp_selection",
     label: "GCP Selection",
-    description: "Match drone images to ground control points, mark GCP pixels",
-    kind: "interactive",
+    description:
+      "Match drone images to ground control points, mark GCP pixels. Optional (highly recommended for a successful orthomosaic)",
+    kind: "optional",
   },
   {
     key: "orthomosaic",
@@ -127,13 +135,14 @@ const AERIAL_STEPS: StepDef[] = [
   {
     key: "plot_boundary_prep",
     label: "Plot Boundary Prep",
-    description: "Draw the outer field boundary, configure plot grid dimensions, and auto-generate plot polygons from field design",
+    description:
+      "Draw the outer field boundary, configure plot grid dimensions, and auto-generate plot polygons from field design",
     kind: "interactive",
   },
   {
     key: "trait_extraction",
     label: "Trait Extraction",
-    description: "Extract vegetation fraction, height, and temperature per plot",
+    description: "Extract vegetation fraction and height per plot",
     kind: "compute",
   },
   {
@@ -142,125 +151,163 @@ const AERIAL_STEPS: StepDef[] = [
     description: "Roboflow detection/segmentation on split plot images",
     kind: "interactive",
   },
-]
+];
 
 // ── SSE progress hook ─────────────────────────────────────────────────────────
 
 interface ProgressEvent {
-  event: string
-  step?: string
-  message?: string
-  index?: number
-  total?: number
-  progress?: number
-  outputs?: Record<string, string>
+  event: string;
+  step?: string;
+  message?: string;
+  index?: number;
+  total?: number;
+  progress?: number;
+  outputs?: Record<string, string>;
 }
 
 function useStepProgress(runId: string, isRunning: boolean) {
-  const [events, setEvents] = useState<ProgressEvent[]>([])
-  const [lastProgress, setLastProgress] = useState<number | null>(null)
-  const esRef = useRef<EventSource | null>(null)
-  const offsetRef = useRef(0)
-  const queryClient = useQueryClient()
+  const [events, setEvents] = useState<ProgressEvent[]>([]);
+  const [lastProgress, setLastProgress] = useState<number | null>(null);
+  const esRef = useRef<EventSource | null>(null);
+  const offsetRef = useRef(0);
+  const queryClient = useQueryClient();
 
   const connect = useCallback(() => {
-    if (esRef.current) esRef.current.close()
+    if (esRef.current) esRef.current.close();
 
-    const url = apiUrl(`/api/v1/pipeline-runs/${runId}/progress?offset=${offsetRef.current}`)
-    const es = new EventSource(url)
-    esRef.current = es
+    const url = apiUrl(
+      `/api/v1/pipeline-runs/${runId}/progress?offset=${offsetRef.current}`
+    );
+    const es = new EventSource(url);
+    esRef.current = es;
 
     es.onmessage = (e) => {
       try {
-        const evt: ProgressEvent = JSON.parse(e.data)
-        offsetRef.current += 1
-        setEvents((prev) => [...prev, evt])
+        const evt: ProgressEvent = JSON.parse(e.data);
+        offsetRef.current += 1;
+        if (evt.event === "start") {
+          // New run started — replace stale events from the previous attempt
+          setEvents([evt]);
+          setLastProgress(null);
+        } else {
+          setEvents((prev) => [...prev, evt]);
+        }
 
-        if (typeof evt.progress === "number") setLastProgress(evt.progress)
+        if (typeof evt.progress === "number") setLastProgress(evt.progress);
 
         // Refresh run state from DB when step completes or fails
-        if (evt.event === "complete" || evt.event === "error" || evt.event === "cancelled") {
-          queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] })
-          es.close()
-          esRef.current = null
+        if (
+          evt.event === "complete" ||
+          evt.event === "error" ||
+          evt.event === "cancelled"
+        ) {
+          queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
+          if (evt.event === "complete" && evt.step === "orthomosaic") {
+            queryClient.invalidateQueries({
+              queryKey: ["orthomosaic-versions", runId],
+            });
+          }
+          es.close();
+          esRef.current = null;
         }
       } catch {
         // ignore parse errors
       }
-    }
+    };
 
     es.onerror = () => {
-      es.close()
-      esRef.current = null
-    }
-  }, [runId, queryClient])
+      es.close();
+      esRef.current = null;
+    };
+  }, [runId, queryClient]);
 
   useEffect(() => {
     if (isRunning) {
-      connect()
+      connect();
     } else {
-      esRef.current?.close()
-      esRef.current = null
+      esRef.current?.close();
+      esRef.current = null;
     }
     return () => {
-      esRef.current?.close()
-      esRef.current = null
-    }
-  }, [isRunning, connect])
+      esRef.current?.close();
+      esRef.current = null;
+    };
+  }, [isRunning, connect]);
 
   const clearEvents = () => {
-    setEvents([])
-    setLastProgress(null)
-    offsetRef.current = 0
-  }
+    // Reset SSE offset so next connection reads from the start of the new run.
+    // Don't wipe displayed events yet — the "start" SSE event will replace them.
+    offsetRef.current = 0;
+  };
 
-  return { events, lastProgress, clearEvents }
+  return { events, lastProgress, clearEvents };
 }
 
 // ── Step status helpers ───────────────────────────────────────────────────────
 
-type StepStatus = "completed" | "running" | "failed" | "ready" | "locked"
+type StepStatus = "completed" | "running" | "failed" | "ready" | "locked";
 
 function getStepStatus(
   stepKey: string,
   currentStep: string | null | undefined,
   stepsCompleted: Record<string, boolean> | null | undefined,
-  runStatus: string,
+  runStatus: string
 ): StepStatus {
-  if (stepsCompleted?.[stepKey]) return "completed"
+  // current_step takes priority — a re-run sets it even when steps_completed still shows true
   if (currentStep === stepKey) {
-    return runStatus === "failed" ? "failed" : "running"
+    return runStatus === "failed" ? "failed" : "running";
   }
-  return "locked"
+  if (stepsCompleted?.[stepKey]) return "completed";
+  return "locked";
 }
 
 function getNextStep(
   steps: StepDef[],
   stepsCompleted: Record<string, boolean> | null | undefined,
-  runStatus: string,
+  runStatus: string
 ): string | null {
-  if (runStatus === "running" || runStatus === "failed") return null
+  if (runStatus === "running" || runStatus === "failed") return null;
+  // Optional steps don't block the sequence — skip over them
   for (const step of steps) {
-    if (!stepsCompleted?.[step.key]) return step.key
+    if (!stepsCompleted?.[step.key] && step.kind !== "optional")
+      return step.key;
   }
-  return null
+  return null;
+}
+
+function isOptionalReady(
+  stepKey: string,
+  steps: StepDef[],
+  stepsCompleted: Record<string, boolean> | null | undefined
+): boolean {
+  const idx = steps.findIndex((s) => s.key === stepKey);
+  // All preceding non-optional steps must be completed
+  return steps
+    .slice(0, idx)
+    .filter((s) => s.kind !== "optional")
+    .every((s) => stepsCompleted?.[s.key]);
 }
 
 // ── Progress log ──────────────────────────────────────────────────────────────
 
 function ProgressLog({ events }: { events: ProgressEvent[] }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [showRaw, setShowRaw] = useState(false)
+  const ref = useRef<HTMLDivElement>(null);
+  const [showRaw, setShowRaw] = useState(false);
 
-  const visibleEvents = showRaw ? events : events.filter((e) => e.event !== "log")
+  const visibleEvents = showRaw
+    ? events
+    : events.filter((e) => e.event !== "log");
 
   useEffect(() => {
-    ref.current?.scrollTo({ top: ref.current.scrollHeight, behavior: "smooth" })
-  }, [visibleEvents])
+    ref.current?.scrollTo({
+      top: ref.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [visibleEvents]);
 
-  if (events.length === 0) return null
+  if (events.length === 0) return null;
 
-  const hasLogs = events.some((e) => e.event === "log")
+  const hasLogs = events.some((e) => e.event === "log");
 
   return (
     <div className="mt-3 space-y-1">
@@ -268,15 +315,17 @@ function ProgressLog({ events }: { events: ProgressEvent[] }) {
         <button
           type="button"
           onClick={() => setShowRaw((v) => !v)}
-          className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+          className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs"
         >
-          <ChevronRight className={`w-3 h-3 transition-transform ${showRaw ? "rotate-90" : ""}`} />
+          <ChevronRight
+            className={`h-3 w-3 transition-transform ${showRaw ? "rotate-90" : ""}`}
+          />
           {showRaw ? "Hide" : "Show"} raw output
         </button>
       )}
       <div
         ref={ref}
-        className="max-h-48 overflow-y-auto rounded-md bg-muted/60 p-3 space-y-0.5 text-xs font-mono"
+        className="bg-muted/60 max-h-48 space-y-0.5 overflow-y-auto rounded-md p-3 font-mono text-xs"
       >
         {visibleEvents.map((e, i) => (
           <div
@@ -300,26 +349,26 @@ function ProgressLog({ events }: { events: ProgressEvent[] }) {
         ))}
       </div>
     </div>
-  )
+  );
 }
 
 // ── Step row ──────────────────────────────────────────────────────────────────
 
 interface StepRowProps {
-  step: StepDef
-  status: StepStatus
-  isNext: boolean
-  isLast: boolean
-  runId: string
-  runStatus: string
-  progressEvents: ProgressEvent[]
-  lastProgress: number | null
-  onRunStep: (step: string) => void
-  onOpenTool: (step: string) => void
-  onStopStep: () => void
-  isExecuting: boolean
-  isStopping: boolean
-  isToolOpen: boolean
+  step: StepDef;
+  status: StepStatus;
+  isNext: boolean;
+  isLast: boolean;
+  runId: string;
+  runStatus: string;
+  progressEvents: ProgressEvent[];
+  lastProgress: number | null;
+  onRunStep: (step: string) => void;
+  onOpenTool: (step: string) => void;
+  onStopStep: () => void;
+  isExecuting: boolean;
+  isStopping: boolean;
+  warning?: string;
 }
 
 function StepRow({
@@ -334,70 +383,87 @@ function StepRow({
   onStopStep,
   isExecuting,
   isStopping,
-  isToolOpen,
+  warning,
 }: StepRowProps) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(false);
 
   // Only show progress events relevant to this step
   const stepEvents = progressEvents.filter(
-    (e) => !e.step || e.step === step.key,
-  )
+    (e) => !e.step || e.step === step.key
+  );
 
   const iconEl = (() => {
     switch (status) {
-      case "completed": return <Check className="w-5 h-5 text-green-600" />
-      case "running":   return <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
-      case "failed":    return <AlertCircle className="w-5 h-5 text-red-600" />
-      case "ready":     return <Clock className="w-5 h-5 text-primary" />
-      default:          return <Lock className="w-5 h-5 text-muted-foreground" />
+      case "completed":
+        return <Check className="h-5 w-5 text-green-600" />;
+      case "running":
+        return <Loader2 className="h-5 w-5 animate-spin text-blue-600" />;
+      case "failed":
+        return <AlertCircle className="h-5 w-5 text-red-600" />;
+      case "ready":
+        return <Clock className="text-primary h-5 w-5" />;
+      default:
+        return <Lock className="text-muted-foreground h-5 w-5" />;
     }
-  })()
+  })();
 
   const circleCls = {
     completed: "border-green-500 bg-green-500/10",
-    running:   "border-blue-500 bg-blue-500/10",
-    failed:    "border-red-500 bg-red-500/10",
-    ready:     "border-primary bg-primary/10",
-    locked:    "border-border bg-muted/30",
-  }[status]
+    running: "border-blue-500 bg-blue-500/10",
+    failed: "border-red-500 bg-red-500/10",
+    ready: "border-primary bg-primary/10",
+    locked: "border-border bg-muted/30",
+  }[status];
 
-  const isActive = status === "running"
-  const canRun = (status === "ready" || status === "completed" || status === "failed") && !isExecuting
-  const isInteractive = step.kind === "interactive"
+  const isActive = status === "running";
+  const canRun =
+    (status === "ready" || status === "completed" || status === "failed") &&
+    !isExecuting;
+  const isInteractive = step.kind === "interactive" || step.kind === "optional";
 
   const actionLabel = (() => {
-    if (isActive) return isStopping ? "Stopping…" : "Running…"
-    if (isInteractive && isToolOpen) return "Close"
-    if (status === "completed") return isInteractive ? "Re-open Tool" : "Re-run"
-    if (isInteractive) return "Open Tool"
-    return "Run Step"
-  })()
+    if (isActive) return isStopping ? "Stopping…" : "Running…";
+    if (status === "completed")
+      return isInteractive ? "Re-open Tool" : "Re-run";
+    if (isInteractive) return "Open Tool";
+    return "Run Step";
+  })();
 
   return (
     <div className="relative">
       {!isLast && (
-        <div className="absolute left-[23px] top-[52px] bottom-0 w-0.5 bg-border" />
+        <div className="bg-border absolute top-[52px] bottom-0 left-[23px] w-0.5" />
       )}
       <div className="flex gap-4">
         <div
-          className={`relative z-10 w-12 h-12 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${circleCls}`}
+          className={`relative z-10 flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full border-2 ${circleCls}`}
         >
           {iconEl}
         </div>
 
         <div className="flex-1 pb-6">
           <div className="flex items-start justify-between gap-2 pt-2">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className={`font-medium ${status === "locked" ? "text-muted-foreground" : ""}`}>
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`font-medium ${status === "locked" ? "text-muted-foreground" : ""}`}
+              >
                 {step.label}
               </span>
-              {step.kind !== "compute" && (
+              {step.kind === "optional" && (
+                <Badge
+                  variant="outline"
+                  className="text-muted-foreground text-xs"
+                >
+                  optional
+                </Badge>
+              )}
+              {step.kind === "interactive" && (
                 <Badge variant="outline" className="text-xs">
-                  {step.kind}
+                  interactive
                 </Badge>
               )}
             </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="flex flex-shrink-0 items-center gap-2">
               {isActive && (
                 <Button
                   variant="outline"
@@ -405,43 +471,59 @@ function StepRow({
                   onClick={onStopStep}
                   disabled={isStopping}
                 >
-                  <Square className="w-3 h-3 mr-1" />
+                  <Square className="mr-1 h-3 w-3" />
                   Stop
                 </Button>
               )}
               <Button
                 variant={status === "completed" ? "outline" : "default"}
                 size="sm"
-                disabled={status === "locked" || isActive || (isExecuting && !isActive)}
+                disabled={
+                  status === "locked" || isActive || (isExecuting && !isActive)
+                }
+                title={warning}
                 onClick={() => {
-                  if (isInteractive) onOpenTool(step.key)
-                  else if (canRun) onRunStep(step.key)
+                  if (isInteractive) onOpenTool(step.key);
+                  else if (canRun) onRunStep(step.key);
                 }}
               >
-                {isActive && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}
+                {isActive && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                {warning && !isActive && (
+                  <TriangleAlert className="mr-1 h-3.5 w-3.5 text-amber-500" />
+                )}
                 {actionLabel}
               </Button>
               {status === "completed" && (
-                <Button variant="ghost" size="icon" onClick={() => setExpanded(!expanded)}>
-                  {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setExpanded(!expanded)}
+                >
+                  {expanded ? (
+                    <ChevronDown className="h-4 w-4" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4" />
+                  )}
                 </Button>
               )}
             </div>
           </div>
 
-          <p className={`text-sm mt-0.5 ${status === "locked" ? "text-muted-foreground/60" : "text-muted-foreground"}`}>
+          <p
+            className={`mt-0.5 text-sm ${status === "locked" ? "text-muted-foreground/60" : "text-muted-foreground"}`}
+          >
             {step.description}
           </p>
 
           {isNext && status !== "completed" && !isActive && (
-            <p className="text-xs text-primary mt-1">Ready to start</p>
+            <p className="text-primary mt-1 text-xs">Ready to start</p>
           )}
 
-          {/* Live progress for running step */}
-          {isActive && (
+          {/* Live progress for running step, or persisted log for failed step */}
+          {(isActive || status === "failed") && (
             <div className="mt-2">
-              {lastProgress !== null && (
-                <Progress value={lastProgress} className="h-1.5 mb-1" />
+              {isActive && lastProgress !== null && (
+                <Progress value={lastProgress} className="mb-1 h-1.5" />
               )}
               <ProgressLog events={stepEvents} />
             </div>
@@ -454,57 +536,82 @@ function StepRow({
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 // ── Outputs table ─────────────────────────────────────────────────────────────
 
-const VIEWABLE_EXTS = new Set([".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"])
-const DOWNLOADABLE_EXTS = new Set([".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".geojson", ".csv", ".zip"])
+const VIEWABLE_EXTS = new Set([
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".tif",
+  ".tiff",
+  ".webp",
+]);
+const DOWNLOADABLE_EXTS = new Set([
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".tif",
+  ".tiff",
+  ".webp",
+  ".geojson",
+  ".csv",
+  ".zip",
+]);
 
 function isViewable(path: string) {
-  const ext = path.slice(path.lastIndexOf(".")).toLowerCase()
-  return VIEWABLE_EXTS.has(ext)
+  const ext = path.slice(path.lastIndexOf(".")).toLowerCase();
+  return VIEWABLE_EXTS.has(ext);
 }
 
 function isDownloadable(path: string) {
-  const ext = path.slice(path.lastIndexOf(".")).toLowerCase()
-  return DOWNLOADABLE_EXTS.has(ext)
+  const ext = path.slice(path.lastIndexOf(".")).toLowerCase();
+  return DOWNLOADABLE_EXTS.has(ext);
 }
 
-function OutputsTable({ outputs, dataRoot }: { outputs: Record<string, unknown> | null | undefined; dataRoot?: string }) {
+function OutputsTable({
+  outputs,
+  dataRoot,
+}: {
+  outputs: Record<string, unknown> | null | undefined;
+  dataRoot?: string;
+}) {
   if (!outputs || Object.keys(outputs).length === 0) {
     return (
-      <div className="flex flex-col items-center py-8 gap-2 text-muted-foreground">
-        <FileText className="w-8 h-8" />
-        <p className="text-sm">No outputs yet. Run steps above to generate files.</p>
+      <div className="text-muted-foreground flex flex-col items-center gap-2 py-8">
+        <FileText className="h-8 w-8" />
+        <p className="text-sm">
+          No outputs yet. Run steps above to generate files.
+        </p>
       </div>
-    )
+    );
   }
 
   const rows: { key: string; value: string }[] = Object.entries(outputs)
     .filter(([, v]) => typeof v === "string")
-    .map(([k, v]) => ({ key: k, value: String(v) }))
+    .map(([k, v]) => ({ key: k, value: String(v) }));
 
   // Resolve relative path to absolute using data_root
   function absPath(relPath: string) {
-    if (!dataRoot || relPath.startsWith("/")) return relPath
-    return `${dataRoot}/${relPath}`
+    if (!dataRoot || relPath.startsWith("/")) return relPath;
+    return `${dataRoot}/${relPath}`;
   }
 
   function handleView(relPath: string) {
-    const abs = absPath(relPath)
-    const url = apiUrl(`/api/v1/files/serve?path=${encodeURIComponent(abs)}`)
-    window.open(url, "_blank")
+    const abs = absPath(relPath);
+    const url = apiUrl(`/api/v1/files/serve?path=${encodeURIComponent(abs)}`);
+    window.open(url, "_blank");
   }
 
   function handleDownload(relPath: string) {
-    const abs = absPath(relPath)
-    const url = apiUrl(`/api/v1/files/serve?path=${encodeURIComponent(abs)}`)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = relPath.split("/").pop() ?? relPath
-    a.click()
+    const abs = absPath(relPath);
+    const url = apiUrl(`/api/v1/files/serve?path=${encodeURIComponent(abs)}`);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = relPath.split("/").pop() ?? relPath;
+    a.click();
   }
 
   return (
@@ -519,21 +626,31 @@ function OutputsTable({ outputs, dataRoot }: { outputs: Record<string, unknown> 
       <TableBody>
         {rows.map((row) => (
           <TableRow key={row.key}>
-            <TableCell className="text-sm capitalize whitespace-nowrap">
+            <TableCell className="text-sm whitespace-nowrap capitalize">
               {row.key.replace(/_/g, " ")}
             </TableCell>
-            <TableCell className="text-sm font-mono text-muted-foreground break-all">
+            <TableCell className="text-muted-foreground font-mono text-sm break-all">
               {row.value.split("/").pop()}
             </TableCell>
             <TableCell className="text-right whitespace-nowrap">
               {isViewable(row.value) && (
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleView(row.value)}>
-                  <Eye className="w-3.5 h-3.5" />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => handleView(row.value)}
+                >
+                  <Eye className="h-3.5 w-3.5" />
                 </Button>
               )}
               {isDownloadable(row.value) && (
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDownload(row.value)}>
-                  <Download className="w-3.5 h-3.5" />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => handleDownload(row.value)}
+                >
+                  <Download className="h-3.5 w-3.5" />
                 </Button>
               )}
             </TableCell>
@@ -541,30 +658,32 @@ function OutputsTable({ outputs, dataRoot }: { outputs: Record<string, unknown> 
         ))}
       </TableBody>
     </Table>
-  )
+  );
 }
 
 // ── Status badge ──────────────────────────────────────────────────────────────
 
 function RunStatusBadge({ status }: { status: string }) {
   const cls: Record<string, string> = {
-    pending:   "bg-gray-500/10 text-gray-700",
-    running:   "bg-blue-500/10 text-blue-700",
+    pending: "bg-gray-500/10 text-gray-700",
+    running: "bg-blue-500/10 text-blue-700",
     completed: "bg-green-500/10 text-green-700",
-    failed:    "bg-red-500/10 text-red-700",
-  }
-  return <Badge className={cls[status] ?? cls.pending}>{status}</Badge>
+    failed: "bg-red-500/10 text-red-700",
+  };
+  return <Badge className={cls[status] ?? cls.pending}>{status}</Badge>;
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function RunDetail() {
-  const navigate = useNavigate()
+  const navigate = useNavigate();
   const { workspaceId, runId } = useParams({
     from: "/_layout/process/$workspaceId/run/$runId",
-  })
-  const { showErrorToast } = useCustomToast()
-  const queryClient = useQueryClient()
+  });
+  const { showErrorToast } = useCustomToast();
+  const queryClient = useQueryClient();
+  const { addProcess, updateProcess, processes } = useProcess();
+  const orthoProcessIdRef = useRef<string | null>(null);
 
   const { data: run, isLoading: runLoading } = useQuery<PipelineRunPublic>({
     queryKey: ["pipeline-runs", runId],
@@ -572,36 +691,160 @@ export function RunDetail() {
     // Poll every 3s while running so status stays fresh even without SSE
     refetchInterval: (query) =>
       query.state.data?.status === "running" ? 3000 : false,
-  })
+  });
 
   const { data: pipeline } = useQuery<PipelinePublic>({
     queryKey: ["pipelines", run?.pipeline_id],
     queryFn: () => PipelinesService.readOne({ id: run!.pipeline_id }),
     enabled: !!run,
-  })
+  });
 
   const { data: settingsData } = useQuery({
     queryKey: ["settings", "data-root"],
     queryFn: () => SettingsService.readDataRoot(),
     staleTime: Infinity,
-  })
-  const dataRoot = settingsData?.value
+  });
+  const dataRoot = settingsData?.value;
 
-  const runStatus = run?.status ?? "pending"
-  const isRunning = runStatus === "running"
-  const pipelineType = pipeline?.type ?? "ground"
-  const steps = pipelineType === "aerial" ? AERIAL_STEPS : GROUND_STEPS
-  const nextStepKey = getNextStep(steps, run?.steps_completed, runStatus)
+  const runStatus = run?.status ?? "pending";
+  const isRunning = runStatus === "running";
+  const pipelineType = pipeline?.type ?? "ground";
 
-  // Inline interactive tool state
-  const [openTool, setOpenTool] = useState<string | null>(null)
+  // Check for an uploaded orthomosaic (aerial only, before ortho step completes)
+  const { data: uploadedOrthoCheck } = useQuery<{
+    available: boolean;
+    filename: string | null;
+  }>({
+    queryKey: ["check-uploaded-ortho", runId],
+    queryFn: () =>
+      fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/check-uploaded-ortho`), {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+        },
+      }).then((r) => r.json()),
+    enabled:
+      !!run && pipelineType === "aerial" && !run?.steps_completed?.orthomosaic,
+    staleTime: 60_000,
+  });
+  // Orthomosaic versions (aerial only)
+  interface OrthoVersion {
+    version: number;
+    rgb: string | null;
+    dem: string | null;
+    pyramid: string | null;
+    created_at: string | null;
+    active: boolean;
+  }
+
+  const { data: orthoVersions, refetch: refetchOrthoVersions } = useQuery<
+    OrthoVersion[]
+  >({
+    queryKey: ["orthomosaic-versions", runId],
+    queryFn: () =>
+      fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/orthomosaics`), {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+        },
+      }).then((r) => r.json()),
+    enabled:
+      !!run && pipelineType === "aerial" && !!run.steps_completed?.orthomosaic,
+    staleTime: 30_000,
+  });
+
+  const activateOrthoMutation = useMutation({
+    mutationFn: (version: number) =>
+      fetch(
+        apiUrl(
+          `/api/v1/pipeline-runs/${runId}/orthomosaics/${version}/activate`
+        ),
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+          },
+        }
+      ).then((r) => {
+        if (!r.ok) throw new Error("Failed to activate version");
+        return r.json();
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["orthomosaic-versions", runId],
+      });
+      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
+    },
+    onError: () => showErrorToast("Failed to activate orthomosaic version"),
+  });
+
+  const deleteOrthoMutation = useMutation({
+    mutationFn: (version: number) =>
+      fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/orthomosaics/${version}`), {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+        },
+      }).then((r) => {
+        if (!r.ok) throw new Error("Failed to delete version");
+        return r.json();
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["orthomosaic-versions", runId],
+      });
+      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
+    },
+    onError: () => showErrorToast("Failed to delete orthomosaic version"),
+  });
+
+  const steps = pipelineType === "aerial" ? AERIAL_STEPS : GROUND_STEPS;
+  const nextStepKey = getNextStep(steps, run?.steps_completed, runStatus);
+
+  // Auto-trigger data_sync for aerial runs that haven't had it completed yet.
+  // Runs silently in the background — the SSE progress bar shows inline.
+  const [autoSyncTriggered, setAutoSyncTriggered] = useState(false);
+  useEffect(() => {
+    if (
+      run &&
+      pipeline &&
+      pipelineType === "aerial" &&
+      !run.steps_completed?.data_sync &&
+      runStatus !== "running" &&
+      runStatus !== "failed" &&
+      !autoSyncTriggered
+    ) {
+      setAutoSyncTriggered(true);
+      executeMutation.mutate({ step: "data_sync" });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run?.id, pipeline?.id]);
+
+  // Navigate to the full-page tool view
+  function handleOpenTool(step: string) {
+    navigate({
+      to: "/process/$workspaceId/tool",
+      params: { workspaceId },
+      search: { runId, step },
+    });
+  }
 
   // SSE progress — only connect when a step is actively running
-  const { events: progressEvents, lastProgress, clearEvents } = useStepProgress(runId, isRunning)
+  const {
+    events: progressEvents,
+    lastProgress,
+    clearEvents,
+  } = useStepProgress(runId, isRunning);
 
-  // Execute step mutation — accepts a full request body so inference can pass API key/model
+  // Execute step mutation
   const executeMutation = useMutation({
-    mutationFn: (body: { step: string; models?: { label: string; roboflow_api_key: string; roboflow_model_id: string; task_type: string }[] }) =>
+    mutationFn: (body: {
+      step: string;
+      models?: {
+        label: string;
+        roboflow_api_key: string;
+        roboflow_model_id: string;
+        task_type: string;
+      }[];
+    }) =>
       ProcessingService.executeStep({
         id: runId,
         requestBody: body,
@@ -609,147 +852,316 @@ export function RunDetail() {
     onMutate: () => clearEvents(),
     onSuccess: () => {
       // Immediately refresh run to get status="running"
-      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] })
+      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
     },
     onError: () => showErrorToast("Failed to start step"),
-  })
+  });
 
   // Stop mutation
   const stopMutation = useMutation({
     mutationFn: () => ProcessingService.stopStep({ id: runId }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] }),
     onError: () => showErrorToast("Failed to stop step"),
-  })
+  });
+
+  // Feed orthomosaic SSE events into the ProcessPanel
+  useEffect(() => {
+    const pid = orthoProcessIdRef.current;
+    if (!pid || !progressEvents.length) return;
+    const latest = progressEvents[progressEvents.length - 1];
+    if (latest.event === "complete") {
+      updateProcess(pid, {
+        status: "completed",
+        progress: 100,
+        message: "Done",
+      });
+    } else if (latest.event === "error" || latest.event === "cancelled") {
+      updateProcess(pid, { status: "error", message: latest.message });
+    } else if (latest.event === "progress") {
+      updateProcess(pid, {
+        ...(typeof latest.progress === "number"
+          ? { progress: latest.progress }
+          : {}),
+        ...(latest.message ? { message: latest.message } : {}),
+      });
+    }
+  }, [progressEvents, updateProcess]);
+
+  // Reconnect orthoProcessIdRef after navigating away and back while ODM was running
+  useEffect(() => {
+    if (orthoProcessIdRef.current) return;
+    const link = `/process/${workspaceId}/run/${runId}`;
+    const existing = processes.find(
+      (p) =>
+        p.link === link && (p.status === "running" || p.status === "pending")
+    );
+    if (existing) orthoProcessIdRef.current = existing.id;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run?.id]);
+
+  // Sync ProcessPanel from DB run status — catches completion/failure while SSE was disconnected
+  useEffect(() => {
+    const pid = orthoProcessIdRef.current;
+    if (!run) return;
+    if (run.steps_completed?.orthomosaic && runStatus !== "running") {
+      if (pid) {
+        updateProcess(pid, {
+          status: "completed",
+          progress: 100,
+          message: "Done",
+        });
+        orthoProcessIdRef.current = null;
+      }
+      refetchOrthoVersions();
+    } else if (runStatus === "failed" && run.current_step === "orthomosaic") {
+      if (pid) {
+        updateProcess(pid, { status: "error", message: run.error ?? "Failed" });
+        orthoProcessIdRef.current = null;
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    runStatus,
+    run?.steps_completed?.orthomosaic,
+    run?.current_step,
+    run?.error,
+    updateProcess,
+  ]);
 
   // Docker check dialog (shown when user tries to run orthomosaic without Docker)
-  const [showDockerDialog, setShowDockerDialog] = useState(false)
+  const [showDockerDialog, setShowDockerDialog] = useState(false);
 
   // Guarded step runner — checks Docker availability before starting orthomosaic
   async function handleRunStep(step: string) {
     if (step === "orthomosaic") {
       try {
-        const result = await UtilsService.dockerCheck()
+        const result = await UtilsService.dockerCheck();
         if (!result.available) {
-          setShowDockerDialog(true)
-          return
+          setShowDockerDialog(true);
+          return;
         }
       } catch {
         // If the check itself fails, let the step run and surface the error via SSE
       }
+      // Register in the background ProcessPanel
+      orthoProcessIdRef.current = addProcess({
+        type: "processing",
+        title: `Orthomosaic (${pipeline?.name ?? "Pipeline"} · ${run?.date})`,
+        status: "running",
+        items: [],
+        link: `/process/${workspaceId}/run/${runId}`,
+      });
     }
-    executeMutation.mutate({ step })
+    executeMutation.mutate({ step });
   }
 
   // Use uploaded orthomosaic (aerial: skip ODM)
-  const [isRegisteringOrtho, setIsRegisteringOrtho] = useState(false)
+  const [isRegisteringOrtho, setIsRegisteringOrtho] = useState(false);
 
   async function handleUseUploadedOrtho() {
-    setIsRegisteringOrtho(true)
+    setIsRegisteringOrtho(true);
     try {
-      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/use-uploaded-ortho`), {
-        method: "POST",
-        headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
-      })
+      const res = await fetch(
+        apiUrl(`/api/v1/pipeline-runs/${runId}/use-uploaded-ortho`),
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+          },
+        }
+      );
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: "Failed to register orthomosaic" }))
-        showErrorToast(err.detail ?? "Failed to register orthomosaic")
-        return
+        const err = await res
+          .json()
+          .catch(() => ({ detail: "Failed to register orthomosaic" }));
+        showErrorToast(err.detail ?? "Failed to register orthomosaic");
+        return;
       }
-      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] })
+      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
     } catch {
-      showErrorToast("Failed to register orthomosaic")
+      showErrorToast("Failed to register orthomosaic");
     } finally {
-      setIsRegisteringOrtho(false)
+      setIsRegisteringOrtho(false);
     }
   }
 
   // Download crops
-  const [isDownloading, setIsDownloading] = useState(false)
-  const hasCrops = !!(run?.outputs?.stitching || run?.outputs?.cropped_images || run?.outputs?.traits)
+  const [isDownloading, setIsDownloading] = useState(false);
+  const hasCrops = !!(
+    run?.outputs?.stitching ||
+    run?.outputs?.cropped_images ||
+    run?.outputs?.traits
+  );
 
   async function handleDownloadCrops() {
-    setIsDownloading(true)
+    setIsDownloading(true);
     try {
-      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/download-crops`), { method: "POST" })
-      if (!res.ok) throw new Error(`Server returned ${res.status}`)
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement("a")
-      a.href = url
-      const cd = res.headers.get("content-disposition") ?? ""
-      const match = cd.match(/filename="([^"]+)"/)
-      a.download = match?.[1] ?? "crops.zip"
-      a.click()
-      URL.revokeObjectURL(url)
+      const res = await fetch(
+        apiUrl(`/api/v1/pipeline-runs/${runId}/download-crops`),
+        { method: "POST" }
+      );
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const cd = res.headers.get("content-disposition") ?? "";
+      const match = cd.match(/filename="([^"]+)"/);
+      a.download = match?.[1] ?? "crops.zip";
+      a.click();
+      URL.revokeObjectURL(url);
     } catch {
-      showErrorToast("Download failed")
+      showErrorToast("Download failed");
     } finally {
-      setIsDownloading(false)
+      setIsDownloading(false);
     }
   }
 
   if (runLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+      <div className="flex min-h-screen items-center justify-center">
+        <Loader2 className="text-muted-foreground h-6 w-6 animate-spin" />
       </div>
-    )
+    );
   }
 
   if (!run) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex min-h-screen items-center justify-center">
         <p className="text-muted-foreground">Run not found.</p>
       </div>
-    )
+    );
   }
 
   return (
     <div className="bg-background min-h-screen">
       <div className="mx-auto max-w-4xl p-8">
         {/* Header */}
-        <div className="flex items-center gap-4 mb-8">
+        <div className="mb-8 flex items-center gap-4">
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => navigate({ to: "/process/$workspaceId", params: { workspaceId } })}
+            onClick={() =>
+              navigate({ to: "/process/$workspaceId", params: { workspaceId } })
+            }
           >
-            <ArrowLeft className="w-5 h-5" />
+            <ArrowLeft className="h-5 w-5" />
           </Button>
           <div className="flex-1">
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-semibold">
-                {pipeline?.name ?? "Pipeline"} — {run.date}
+                {pipeline?.name ?? "Pipeline"} ({run.date})
               </h1>
               <RunStatusBadge status={runStatus} />
             </div>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              {run.experiment} / {run.location} / {run.population} · {run.platform} · {run.sensor}
+            <p className="text-muted-foreground mt-0.5 text-sm">
+              {run.experiment} / {run.location} / {run.population} ·{" "}
+              {run.platform} · {run.sensor}
             </p>
           </div>
         </div>
 
-        {/* Error banner */}
-        {runStatus === "failed" && run.error && (
-          <div className="mb-6 p-4 rounded-lg bg-red-500/10 border border-red-200 text-red-700 text-sm">
-            <strong>Error:</strong> {run.error}
-          </div>
-        )}
+        {/* Auto data-sync progress banner */}
+        {pipelineType === "aerial" &&
+          isRunning &&
+          run.current_step === "data_sync" && (
+            <div className="bg-muted/40 mb-4 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm">
+              <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-blue-500" />
+              <div className="flex-1">
+                <span className="font-medium">Preparing data…</span>
+                <span className="text-muted-foreground ml-2">
+                  Extracting GPS from images and syncing with platform log.
+                </span>
+              </div>
+              {lastProgress !== null && (
+                <Progress value={lastProgress} className="h-1.5 w-24" />
+              )}
+            </div>
+          )}
+
+        {/* Aerial: uploaded orthomosaic detected — offer to skip ODM */}
+        {pipelineType === "aerial" &&
+          uploadedOrthoCheck?.available &&
+          !run.steps_completed?.orthomosaic && (
+            <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950/30">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-medium">
+                    Uploaded orthomosaic detected
+                  </p>
+                  <p className="text-muted-foreground mt-0.5 text-xs">
+                    <strong>{uploadedOrthoCheck.filename}</strong> was found in
+                    the Orthomosaic folder. Use it directly (skips GCP selection
+                    and ODM generation) or generate a new one.
+                  </p>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={isRegisteringOrtho || isRunning}
+                    onClick={() => {
+                      /* dismiss — user wants to run ODM normally */
+                      queryClient.setQueryData(
+                        ["check-uploaded-ortho", runId],
+                        {
+                          available: false,
+                          filename: null,
+                        }
+                      );
+                    }}
+                  >
+                    Generate with ODM
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={isRegisteringOrtho || isRunning}
+                    onClick={handleUseUploadedOrtho}
+                  >
+                    {isRegisteringOrtho && (
+                      <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                    )}
+                    {isRegisteringOrtho ? "Registering…" : "Use Uploaded"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
 
         {/* Step stepper */}
         <Card className="mb-6">
           <CardHeader>
             <CardTitle>Processing Steps</CardTitle>
             <CardDescription>
-              {pipelineType === "aerial" ? "Aerial" : "Ground"} pipeline · {steps.length} steps
+              {pipelineType === "aerial" ? "Aerial" : "Ground"} pipeline ·{" "}
+              {steps.length} steps
             </CardDescription>
           </CardHeader>
           <CardContent>
             {steps.map((step, idx) => {
-              const status = getStepStatus(step.key, run.current_step, run.steps_completed, runStatus)
-              const isNext = nextStepKey === step.key
+              const status = getStepStatus(
+                step.key,
+                run.current_step,
+                run.steps_completed,
+                runStatus
+              );
+              const isNext = nextStepKey === step.key;
               const effectiveStatus: StepStatus =
-                isNext && status === "locked" ? "ready" : status
+                isNext && status === "locked"
+                  ? "ready"
+                  : step.kind === "optional" &&
+                      status === "locked" &&
+                      isOptionalReady(step.key, steps, run.steps_completed)
+                    ? "ready"
+                    : status;
+
+              // Warn on orthomosaic if GCP was skipped
+              const warning =
+                step.key === "orthomosaic" &&
+                !run.steps_completed?.gcp_selection
+                  ? "GCP selection was skipped — orthomosaic accuracy may be reduced"
+                  : undefined;
 
               return (
                 <StepRow
@@ -761,142 +1173,157 @@ export function RunDetail() {
                   runId={runId}
                   runStatus={runStatus}
                   progressEvents={progressEvents}
-                  lastProgress={run.current_step === step.key ? lastProgress : null}
+                  lastProgress={
+                    run.current_step === step.key ? lastProgress : null
+                  }
                   onRunStep={handleRunStep}
-                  onOpenTool={(s) => setOpenTool(openTool === s ? null : s)}
+                  onOpenTool={handleOpenTool}
                   onStopStep={() => stopMutation.mutate()}
                   isExecuting={executeMutation.isPending || isRunning}
                   isStopping={stopMutation.isPending}
-                  isToolOpen={openTool === step.key}
+                  warning={warning}
                 />
-              )
+              );
             })}
           </CardContent>
         </Card>
 
-        {/* Aerial: use uploaded orthomosaic instead of running ODM */}
-        {pipelineType === "aerial" && !run.steps_completed?.orthomosaic && (
-          <div className="mb-6 p-4 rounded-lg border border-dashed flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium">Skip ODM — Use Uploaded Orthomosaic</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                If you already have a GeoTIFF orthomosaic, upload it via Files → Orthomosaic
-                (same experiment/location/population/date/platform/sensor), then click here to
-                register it and skip the ODM generation step.
-              </p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex-shrink-0"
-              disabled={isRegisteringOrtho || isRunning}
-              onClick={handleUseUploadedOrtho}
-            >
-              {isRegisteringOrtho && <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />}
-              {isRegisteringOrtho ? "Registering…" : "Use Uploaded Orthomosaic"}
-            </Button>
-          </div>
-        )}
-
-        {/* Inline interactive tools */}
-        {openTool === "plot_boundary_prep" && (
+        {/* Orthomosaic Versions (aerial only) */}
+        {pipelineType === "aerial" && run.steps_completed?.orthomosaic && (
           <Card className="mb-6">
             <CardHeader>
-              <CardTitle>Plot Boundary Prep</CardTitle>
-              <CardDescription>
-                Draw the outer field boundary on the mosaic, then generate a rectangular plot grid
-                from your field design CSV and dimension settings.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <PlotBoundaryPrep
-                runId={runId}
-                onSaved={() => {
-                  setOpenTool(null)
-                  queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] })
-                }}
-                onCancel={() => setOpenTool(null)}
-              />
-            </CardContent>
-          </Card>
-        )}
-
-        {openTool === "gcp_selection" && (
-          <Card className="mb-6">
-            <CardHeader>
-              <CardTitle>GCP Picker</CardTitle>
-              <CardDescription>
-                Select each ground control point in a drone image and mark its pixel location.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <GcpPicker
-                runId={runId}
-                onSaved={() => {
-                  setOpenTool(null)
-                  queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] })
-                }}
-                onCancel={() => setOpenTool(null)}
-              />
-            </CardContent>
-          </Card>
-        )}
-
-        {openTool === "inference" && (
-          <Card className="mb-6">
-            <CardHeader>
-              <CardTitle>Inference</CardTitle>
-              <CardDescription>
-                Run Roboflow detection or segmentation on plot images and view results.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <InferenceTool
-                runId={runId}
-                inferenceComplete={!!run.steps_completed?.inference}
-                isRunning={isRunning && run.current_step === "inference"}
-                isStopping={stopMutation.isPending}
-                onRunInference={(cfg: InferenceRunConfig) => {
-                  executeMutation.mutate({
-                    step: "inference",
-                    models: cfg.models,
-                  })
-                }}
-                onCancel={() => setOpenTool(null)}
-              />
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Outputs table */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <CardTitle>Output Files</CardTitle>
-                <CardDescription>
-                  Files generated by this run, stored as paths relative to your data root.
-                </CardDescription>
+              <div className="flex items-center gap-2">
+                <Layers className="text-muted-foreground h-4 w-4" />
+                <CardTitle>Orthomosaic Versions</CardTitle>
               </div>
-              {hasCrops && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleDownloadCrops}
-                  disabled={isDownloading}
-                >
-                  {isDownloading
-                    ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    : <Download className="w-4 h-4 mr-2" />}
-                  Download Crops
-                </Button>
+              <CardDescription>
+                Each time you re-run orthomosaic generation, a new versioned
+                copy is saved. The active version is used for subsequent steps.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {!orthoVersions || orthoVersions.length === 0 ? (
+                <p className="text-muted-foreground py-4 text-center text-sm">
+                  No versions found.
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Version</TableHead>
+                      <TableHead>Created</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {[...orthoVersions]
+                      .sort((a, b) => b.version - a.version)
+                      .map((v) => (
+                        <TableRow key={v.version}>
+                          <TableCell className="font-medium">
+                            v{v.version}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground text-sm">
+                            {v.created_at
+                              ? new Date(v.created_at).toLocaleString()
+                              : "—"}
+                          </TableCell>
+                          <TableCell>
+                            {v.active ? (
+                              <Badge className="bg-green-500/10 text-green-700">
+                                Active
+                              </Badge>
+                            ) : (
+                              <Badge
+                                variant="outline"
+                                className="text-muted-foreground"
+                              >
+                                Inactive
+                              </Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              {!v.active && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={
+                                    activateOrthoMutation.isPending ||
+                                    deleteOrthoMutation.isPending
+                                  }
+                                  onClick={() =>
+                                    activateOrthoMutation.mutate(v.version)
+                                  }
+                                >
+                                  <Star className="mr-1 h-3.5 w-3.5" />
+                                  Activate
+                                </Button>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-red-500 hover:text-red-600"
+                                disabled={
+                                  activateOrthoMutation.isPending ||
+                                  deleteOrthoMutation.isPending
+                                }
+                                onClick={() =>
+                                  deleteOrthoMutation.mutate(v.version)
+                                }
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                  </TableBody>
+                </Table>
               )}
-            </div>
-          </CardHeader>
-          <CardContent>
-            <OutputsTable outputs={run.outputs} dataRoot={dataRoot} />
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Advanced — Output Files (collapsible) */}
+        <details className="group">
+          <summary className="text-muted-foreground hover:text-foreground flex cursor-pointer list-none items-center gap-1.5 py-2 text-sm select-none">
+            <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" />
+            Advanced
+          </summary>
+          <Card className="mt-2">
+            <CardHeader>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <CardTitle>Output Files</CardTitle>
+                  <CardDescription>
+                    Files generated by this run, stored as paths relative to
+                    your data root.
+                  </CardDescription>
+                </div>
+                {hasCrops && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDownloadCrops}
+                    disabled={isDownloading}
+                  >
+                    {isDownloading ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Download className="mr-2 h-4 w-4" />
+                    )}
+                    Download Crops
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              <OutputsTable outputs={run.outputs} dataRoot={dataRoot} />
+            </CardContent>
+          </Card>
+        </details>
       </div>
 
       {/* Docker missing dialog */}
@@ -905,27 +1332,36 @@ export function RunDetail() {
           <DialogHeader>
             <DialogTitle>Docker Required</DialogTitle>
             <DialogDescription asChild>
-              <div className="space-y-3 text-sm text-muted-foreground">
+              <div className="text-muted-foreground space-y-3 text-sm">
                 <p>
                   Orthomosaic generation uses{" "}
-                  <strong className="text-foreground">OpenDroneMap (ODM)</strong>, which requires
-                  Docker to be installed on your machine.
+                  <strong className="text-foreground">
+                    OpenDroneMap (ODM)
+                  </strong>
+                  , which requires Docker to be installed on your machine.
                 </p>
                 <p>
-                  Docker was not found. Download and install Docker Desktop, then restart GEMI.
-                  The ODM image (~4 GB) will download automatically the first time you run this
-                  step — no extra setup needed.
+                  Docker was not found. Download and install Docker Desktop,
+                  then restart GEMI. The ODM image (~4 GB) will download
+                  automatically the first time you run this step — no extra
+                  setup needed.
                 </p>
               </div>
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter className="flex-col sm:flex-row gap-2">
-            <Button variant="outline" onClick={() => setShowDockerDialog(false)}>
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
+            <Button
+              variant="outline"
+              onClick={() => setShowDockerDialog(false)}
+            >
               Cancel
             </Button>
             <Button
               onClick={() => {
-                window.open("https://www.docker.com/products/docker-desktop/", "_blank")
+                window.open(
+                  "https://www.docker.com/products/docker-desktop/",
+                  "_blank"
+                );
               }}
             >
               Download Docker Desktop
@@ -934,5 +1370,5 @@ export function RunDetail() {
         </DialogContent>
       </Dialog>
     </div>
-  )
+  );
 }

@@ -215,7 +215,27 @@ def run_step_in_background(
             run = session.get(PipelineRun, run_id)
             if run:
                 existing_outputs = dict(run.outputs or {})
-                existing_outputs.update(outputs or {})
+                outputs = dict(outputs or {})
+
+                # Orthomosaic versioning: append new entry to the list instead of overwriting
+                if "_ortho_new_entry" in outputs:
+                    new_entry = outputs.pop("_ortho_new_entry")
+                    existing_list = list(existing_outputs.get("orthomosaics", []))
+                    # Backward-compat: migrate old flat "orthomosaic" key to v1 entry
+                    if not existing_list and existing_outputs.get("orthomosaic"):
+                        existing_list = [{
+                            "version": 1,
+                            "rgb": existing_outputs.pop("orthomosaic"),
+                            "dem": existing_outputs.pop("dem", None),
+                            "pyramid": None,
+                            "created_at": None,
+                        }]
+                    # Remove any existing entry with same version (re-run)
+                    existing_list = [o for o in existing_list if o["version"] != new_entry["version"]]
+                    existing_list.append(new_entry)
+                    existing_outputs["orthomosaics"] = existing_list
+
+                existing_outputs.update(outputs)
                 existing_steps = dict(run.steps_completed or {})
                 existing_steps[step] = True
                 all_steps = _all_steps_for_run(run)

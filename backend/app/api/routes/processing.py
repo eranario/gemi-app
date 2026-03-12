@@ -66,6 +66,28 @@ def _get_paths(session: Session, run: PipelineRun) -> RunPaths:
     return RunPaths.from_db(session=session, run=run, workspace=workspace)
 
 
+def _get_active_ortho_tif(paths: RunPaths, outputs: dict) -> Path | None:
+    """
+    Return the active orthomosaic TIF path (pyramid preferred, falls back to RGB).
+    Handles both the new versioned format and the old flat-key format.
+    """
+    active_version = outputs.get("active_ortho_version")
+    orthos = outputs.get("orthomosaics", [])
+    active = next((o for o in orthos if o["version"] == active_version), None)
+    if active:
+        for key in ("pyramid", "rgb"):
+            rel = active.get(key)
+            if rel:
+                p = paths.abs(rel)
+                if p.exists():
+                    return p
+    # Backward-compat: old flat keys / unversioned files
+    for candidate in (paths.aerial_rgb_pyramid, paths.aerial_rgb):
+        if candidate.exists():
+            return candidate
+    return None
+
+
 # ── Execute step ──────────────────────────────────────────────────────────────
 
 GROUND_COMPUTE_STEPS = {"stitching", "georeferencing", "associate_boundaries"}
@@ -434,6 +456,51 @@ class GeneratePlotGridRequest(BaseModel):
     options: dict[str, Any]        # width, length, rows, columns, verticalSpacing, horizontalSpacing, angle
 
 
+class SavePlotGridRequest(BaseModel):
+    geojson: dict[str, Any]        # pre-computed GeoJSON FeatureCollection
+    pop_boundary: dict[str, Any]   # GeoJSON Feature (for saving Pop-Boundary file)
+    grid_options: dict[str, Any] | None = None   # GridOptions (width, length, rows, …)
+    grid_offset: dict[str, Any] | None = None    # { lon, lat } drag offset
+
+
+@router.post("/pipeline-runs/{id}/save-plot-grid")
+def save_plot_grid(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    body: SavePlotGridRequest,
+) -> dict[str, Any]:
+    """Save a pre-computed plot grid GeoJSON from the frontend (bypasses backend computation)."""
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+    paths.intermediate_pipeline.mkdir(parents=True, exist_ok=True)
+
+    paths.pop_boundary_geojson.write_text(json.dumps(body.pop_boundary, indent=2))
+
+    # Embed grid_settings as a non-standard top-level key so options are restored on re-open
+    geojson_to_save = dict(body.geojson)
+    if body.grid_options is not None:
+        geojson_to_save["grid_settings"] = {
+            "options": body.grid_options,
+            "offset": body.grid_offset or {"lon": 0, "lat": 0},
+        }
+    paths.plot_boundary_geojson.write_text(json.dumps(geojson_to_save, indent=2))
+
+    existing_outputs = dict(run.outputs or {})
+    existing_outputs["plot_boundary_prep"] = paths.rel(paths.plot_boundary_geojson)
+    existing_steps = dict(run.steps_completed or {})
+    existing_steps["plot_boundary_prep"] = True
+
+    update_pipeline_run(
+        session=session,
+        db_run=run,
+        run_in=PipelineRunUpdate(steps_completed=existing_steps, outputs=existing_outputs),
+    )
+
+    return {"status": "saved", "feature_count": len(body.geojson.get("features", []))}
+
+
 @router.post("/pipeline-runs/{id}/generate-plot-grid")
 def generate_plot_grid(
     *,
@@ -590,43 +657,180 @@ def _read_exif_gps(img_path: Path) -> dict[str, float | None]:
         return {"lat": None, "lon": None, "alt": None}
 
 
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Return great-circle distance in metres between two WGS-84 points."""
+    import math
+    R = 6_371_000.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlam = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(a))
+
+
+def _parse_gps_float(val: Any) -> float | None:
+    """
+    Safely parse a GPS value from a CSV cell.
+    Returns None for empty strings, 'nan', 'none', or actual NaN floats
+    (pandas writes NaN as empty string in CSV output).
+    """
+    import math
+    if val is None:
+        return None
+    s = str(val).strip().lower()
+    if s in ("", "nan", "none", "null"):
+        return None
+    try:
+        f = float(s)
+        return None if math.isnan(f) else f
+    except ValueError:
+        return None
+
+
 @router.get("/pipeline-runs/{id}/gcp-candidates")
 def gcp_candidates(
     session: SessionDep,
     current_user: CurrentUser,
     id: uuid.UUID,
+    radius_m: float = 5.0,
+    filter_by_gcp: bool = True,
 ) -> dict[str, Any]:
     """
-    Return:
-    - gcps: parsed list from gcp_locations.csv (label, lat, lon, alt)
-    - images: all drone images with their EXIF GPS coordinates
-    - has_gcp_locations: whether the CSV is available
-    - raw_dir: absolute path to the raw image directory (for /files/serve)
+    Return drone images, optionally filtered to those within `radius_m` metres
+    of any GCP.
 
-    The frontend uses image GPS to sort candidates by proximity to each GCP
-    and to build geo.txt when saving.
+    GPS source priority:
+      1. msgs_synced.csv  — platform-log-corrected positions (most accurate)
+      2. Image EXIF       — fallback when data_sync hasn't run yet
+
+    When filter_by_gcp=True (default), only images with valid GPS within the
+    radius are returned.  Images with no GPS at all are excluded from the
+    filtered set (they cannot be reliably placed relative to GCPs).
+    When filter_by_gcp=False, all images are returned unfiltered.
     """
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
 
     gcp_csv = paths.gcp_locations()
     has_gcp_csv = gcp_csv.exists()
-
     gcps: list[dict[str, Any]] = _parse_gcp_csv(gcp_csv) if has_gcp_csv else []
 
+    # ── Resolve image directory ───────────────────────────────────────────────
+    _img_exts = {".jpg", ".jpeg", ".png"}
+    image_dir: Path | None = None
+    if run.file_upload_id is not None:
+        from app.models.file_upload import FileUpload as _FileUpload
+        fu = session.get(_FileUpload, run.file_upload_id)
+        if fu:
+            candidate = paths.data_root / fu.storage_path
+            if candidate.is_dir():
+                image_dir = candidate
+    if image_dir is None:
+        for candidate in [paths.raw / "Images", paths.raw]:
+            if candidate.is_dir() and any(f.suffix.lower() in _img_exts for f in candidate.iterdir()):
+                image_dir = candidate
+                break
+
+    all_image_files: list[Path] = []
+    if image_dir and image_dir.exists():
+        all_image_files = sorted(
+            p for p in image_dir.iterdir() if p.suffix.lower() in _img_exts
+        )
+
+    # ── Build GPS lookup from msgs_synced.csv (preferred) ────────────────────
+    # msgs_synced columns: image_path, timestamp, lat, lon, alt, ...
+    # pandas writes NaN as empty string, so use _parse_gps_float everywhere.
+    msgs_gps: dict[str, dict[str, float | None]] = {}
+    has_msgs_synced = paths.msgs_synced.exists()
+    if has_msgs_synced:
+        try:
+            import csv
+            with open(paths.msgs_synced, newline="") as fh:
+                reader = csv.DictReader(fh)
+                for row in reader:
+                    try:
+                        basename = Path(row["image_path"]).name
+                        msgs_gps[basename] = {
+                            "lat": _parse_gps_float(row.get("lat")),
+                            "lon": _parse_gps_float(row.get("lon")),
+                            "alt": _parse_gps_float(row.get("alt")),
+                        }
+                    except (KeyError, ValueError):
+                        continue
+        except Exception:
+            has_msgs_synced = False
+
+    # ── Build image list with best-available GPS ──────────────────────────────
     images: list[dict[str, Any]] = []
-    if paths.raw.exists():
-        for p in sorted(paths.raw.iterdir()):
-            if p.suffix.lower() in {".jpg", ".jpeg", ".png"}:
-                gps = _read_exif_gps(p)
-                images.append({"name": p.name, **gps})
+    for p in all_image_files:
+        if p.name in msgs_gps:
+            gps = msgs_gps[p.name]
+        else:
+            gps = _read_exif_gps(p)
+        images.append({"name": p.name, **gps})
+
+    # ── Filter by proximity to any GCP ────────────────────────────────────────
+    total_images = len(images)
+    filtered = False
+    no_gps_count = sum(1 for img in images if img.get("lat") is None or img.get("lon") is None)
+
+    if filter_by_gcp and gcps:
+        gcp_coords = [(g["lat"], g["lon"]) for g in gcps if g.get("lat") is not None]
+        if gcp_coords:
+            near: list[dict[str, Any]] = []
+            for img in images:
+                lat, lon = img.get("lat"), img.get("lon")
+                if lat is None or lon is None:
+                    # No GPS — exclude from filtered results (can't determine proximity)
+                    continue
+                min_dist = min(
+                    _haversine_m(lat, lon, glat, glon)
+                    for glat, glon in gcp_coords
+                )
+                if min_dist <= radius_m:
+                    near.append({**img, "dist_m": round(min_dist, 1)})
+            # Only apply filter if it actually reduced the set; if nothing matched
+            # (e.g. all images lack GPS or radius too tight) return all images.
+            if near:
+                images = near
+                filtered = True
+
+    # ── Load existing gcp_list.txt selections ─────────────────────────────────
+    existing_selections: list[dict[str, Any]] = []
+    if paths.gcp_list.exists():
+        try:
+            lines = paths.gcp_list.read_text().splitlines()
+        except Exception:
+            lines = []
+        for line in lines[1:]:  # skip EPSG:4326 header
+            parts = line.strip().split()
+            if len(parts) < 7:
+                continue
+            try:
+                existing_selections.append({
+                    "label":   parts[6],
+                    "image":   parts[5],
+                    "lat":     float(parts[0]),
+                    "lon":     float(parts[1]),
+                    "alt":     float(parts[2]),
+                    "pixel_x": int(parts[3]),
+                    "pixel_y": int(parts[4]),
+                })
+            except (ValueError, IndexError):
+                continue
 
     return {
         "has_gcp_locations": has_gcp_csv,
         "gcps": gcps,
         "images": images,
         "count": len(images),
-        "raw_dir": str(paths.raw),
+        "total_images": total_images,
+        "filtered": filtered,
+        "radius_m": radius_m,
+        "no_gps_count": no_gps_count,
+        "has_msgs_synced": has_msgs_synced,
+        "raw_dir": str(image_dir) if image_dir else str(paths.raw),
+        "existing_selections": existing_selections,
     }
 
 
@@ -938,7 +1142,8 @@ def orthomosaic_info(
     paths = _get_paths(session, run)
 
     not_available = {"available": False, "path": None, "bounds": None,
-                    "existing_geojson": None, "existing_pop_boundary": None}
+                    "existing_geojson": None, "existing_pop_boundary": None,
+                    "existing_grid_settings": None}
 
     if pipeline and pipeline.type == "ground":
         # Ground: combined_mosaic.tif lives inside the georeferencing output dir
@@ -954,12 +1159,15 @@ def orthomosaic_info(
 
         # Load existing plot_boundaries.geojson (georeferenced plot footprints)
         existing_geojson = None
+        existing_grid_settings = None
         geo_json_rel = (run.outputs or {}).get("plot_boundaries_geojson")
         if geo_json_rel:
             geo_json_path = paths.abs(geo_json_rel)
             if geo_json_path.exists():
                 try:
-                    existing_geojson = json.loads(geo_json_path.read_text())
+                    raw = json.loads(geo_json_path.read_text())
+                    existing_grid_settings = raw.pop("grid_settings", None)
+                    existing_geojson = raw
                 except Exception:
                     pass
 
@@ -977,20 +1185,24 @@ def orthomosaic_info(
             "bounds": bounds,
             "existing_geojson": existing_geojson,
             "existing_pop_boundary": existing_pop,
+            "existing_grid_settings": existing_grid_settings,
         }
 
     else:
-        # Aerial: prefer Pyramid/COG, fall back to full RGB
-        tif = paths.aerial_rgb_pyramid if paths.aerial_rgb_pyramid.exists() else paths.aerial_rgb
-        if not tif.exists():
+        # Aerial: use active orthomosaic version (pyramid preferred)
+        tif = _get_active_ortho_tif(paths, run.outputs or {})
+        if not tif:
             return not_available
 
         bounds = _read_tif_bounds(tif)
 
         existing_geojson = None
+        existing_grid_settings = None
         if paths.plot_boundary_geojson.exists():
             try:
-                existing_geojson = json.loads(paths.plot_boundary_geojson.read_text())
+                raw = json.loads(paths.plot_boundary_geojson.read_text())
+                existing_grid_settings = raw.pop("grid_settings", None)
+                existing_geojson = raw
             except Exception:
                 pass
 
@@ -1007,7 +1219,178 @@ def orthomosaic_info(
             "bounds": bounds,
             "existing_geojson": existing_geojson,
             "existing_pop_boundary": existing_pop,
+            "existing_grid_settings": existing_grid_settings,
         }
+
+
+# ── Mosaic preview (web-safe JPEG for Leaflet ImageOverlay) ──────────────────
+
+@router.get("/pipeline-runs/{id}/mosaic-preview")
+def mosaic_preview(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    max_size: int = 4096,
+):
+    """
+    Return the mosaic as a downscaled JPEG so WebKit can render it.
+    TIF files are not renderable as <img> in WebKit/Tauri.
+    """
+    import io
+    import numpy as np
+    import rasterio
+    from rasterio.crs import CRS
+    from rasterio.warp import transform_bounds, calculate_default_transform, reproject, Resampling
+    from fastapi.responses import Response
+
+    run = _get_run_or_404(session, id)
+    pipeline = session.get(Pipeline, run.pipeline_id)
+    paths = _get_paths(session, run)
+
+    # Resolve TIF path (same logic as orthomosaic_info)
+    if pipeline and pipeline.type == "ground":
+        geo_rel = (run.outputs or {}).get("georeferencing")
+        if not geo_rel:
+            raise HTTPException(404, "No mosaic available")
+        tif = paths.abs(geo_rel) / "combined_mosaic.tif"
+    else:
+        tif = _get_active_ortho_tif(paths, run.outputs or {})
+
+    if not tif or not tif.exists():
+        raise HTTPException(404, "Mosaic file not found")
+
+    try:
+        with rasterio.open(tif) as src:
+            # Downsample to max_size on the longest side
+            scale = min(max_size / src.width, max_size / src.height, 1.0)
+            out_w = max(1, int(src.width * scale))
+            out_h = max(1, int(src.height * scale))
+
+            # Read RGB bands (first 3)
+            n_bands = min(src.count, 3)
+            data = src.read(
+                list(range(1, n_bands + 1)),
+                out_shape=(n_bands, out_h, out_w),
+                resampling=Resampling.average,
+            )
+
+        # Normalise to uint8
+        img = np.transpose(data, (1, 2, 0))  # (H, W, C)
+        if img.dtype != np.uint8:
+            mn, mx = img.min(), img.max()
+            if mx > mn:
+                img = ((img - mn) / (mx - mn) * 255).astype(np.uint8)
+            else:
+                img = np.zeros_like(img, dtype=np.uint8)
+
+        # If only 1 band, duplicate to RGB
+        if img.shape[2] == 1:
+            img = np.repeat(img, 3, axis=2)
+
+        from PIL import Image
+        pil_img = Image.fromarray(img, mode="RGB")
+        buf = io.BytesIO()
+        pil_img.save(buf, format="JPEG", quality=85)
+        buf.seek(0)
+        return Response(content=buf.read(), media_type="image/jpeg")
+
+    except Exception as exc:
+        logger.exception("mosaic_preview failed: %s", exc)
+        raise HTTPException(500, f"Failed to generate preview: {exc}")
+
+
+# ── Orthomosaic version management ───────────────────────────────────────────
+
+def _get_ortho_versions(outputs: dict) -> list[dict]:
+    """Return the orthomosaics list, surfacing old flat-key format as v1."""
+    versions = list(outputs.get("orthomosaics", []))
+    if not versions and outputs.get("orthomosaic"):
+        versions = [{
+            "version": 1,
+            "rgb": outputs["orthomosaic"],
+            "dem": outputs.get("dem"),
+            "pyramid": None,
+            "created_at": None,
+        }]
+    return versions
+
+
+@router.get("/pipeline-runs/{id}/orthomosaics")
+def list_orthomosaics(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> list[dict]:
+    run = _get_run_or_404(session, id)
+    outputs = run.outputs or {}
+    versions = _get_ortho_versions(outputs)
+    active = outputs.get("active_ortho_version")
+    return [{"active": v["version"] == active, **v} for v in sorted(versions, key=lambda x: x["version"])]
+
+
+@router.delete("/pipeline-runs/{id}/orthomosaics/{version}", status_code=200)
+def delete_orthomosaic(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    version: int,
+) -> None:
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+    existing_outputs = dict(run.outputs or {})
+    versions = _get_ortho_versions(existing_outputs)
+    target = next((v for v in versions if v["version"] == version), None)
+    if not target:
+        raise HTTPException(404, f"Orthomosaic version {version} not found")
+
+    # Delete files
+    for key in ("rgb", "dem", "pyramid"):
+        rel = target.get(key)
+        if rel:
+            p = paths.abs(rel)
+            if p.exists():
+                p.unlink(missing_ok=True)
+
+    # Remove from list and update active if needed
+    versions = [v for v in versions if v["version"] != version]
+    existing_outputs["orthomosaics"] = versions
+    existing_outputs.pop("orthomosaic", None)  # remove legacy key if present
+    existing_outputs.pop("dem", None)
+
+    if existing_outputs.get("active_ortho_version") == version:
+        if versions:
+            existing_outputs["active_ortho_version"] = max(v["version"] for v in versions)
+        else:
+            existing_outputs.pop("active_ortho_version", None)
+
+    update_pipeline_run(
+        session=session,
+        db_run=run,
+        run_in=PipelineRunUpdate(outputs=existing_outputs),
+    )
+
+
+@router.post("/pipeline-runs/{id}/orthomosaics/{version}/activate")
+def activate_orthomosaic(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    version: int,
+) -> dict:
+    run = _get_run_or_404(session, id)
+    existing_outputs = dict(run.outputs or {})
+    versions = _get_ortho_versions(existing_outputs)
+    if not any(v["version"] == version for v in versions):
+        raise HTTPException(404, f"Orthomosaic version {version} not found")
+    existing_outputs["active_ortho_version"] = version
+    existing_outputs["orthomosaics"] = versions  # ensure list format is stored
+    existing_outputs.pop("orthomosaic", None)  # remove legacy key
+    update_pipeline_run(
+        session=session,
+        db_run=run,
+        run_in=PipelineRunUpdate(outputs=existing_outputs),
+    )
+    return {"active_ortho_version": version}
 
 
 # ── Aerial: use uploaded orthomosaic (skip ODM step) ─────────────────────────
@@ -1071,6 +1454,8 @@ def use_uploaded_ortho(
     existing_outputs = dict(run.outputs or {})
     existing_outputs["orthomosaic"] = paths.rel(dest_tif)
     existing_steps = dict(run.steps_completed or {})
+    # Mark data_sync and orthomosaic as done so plot_boundary_prep unlocks immediately
+    existing_steps["data_sync"] = True
     existing_steps["orthomosaic"] = True
 
     update_pipeline_run(
@@ -1079,6 +1464,27 @@ def use_uploaded_ortho(
         run_in=PipelineRunUpdate(steps_completed=existing_steps, outputs=existing_outputs),
     )
     return {"status": "registered", "tif": paths.rel(dest_tif)}
+
+
+@router.get("/pipeline-runs/{id}/check-uploaded-ortho")
+def check_uploaded_ortho(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> dict[str, Any]:
+    """Check whether an uploaded orthomosaic TIF exists for this run (non-destructive)."""
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+    ortho_dir = paths.raw / "Orthomosaic"
+    if not ortho_dir.exists():
+        return {"available": False, "filename": None}
+    tif_files = sorted(
+        p for p in ortho_dir.iterdir()
+        if p.suffix.lower() in {".tif", ".tiff"} and ".original" not in p.stem
+    )
+    if not tif_files:
+        return {"available": False, "filename": None}
+    return {"available": True, "filename": tif_files[0].name}
 
 
 # ── Shared: inference results ────────────────────────────────────────────────

@@ -23,4 +23,10 @@ export interface Process {
   createdAt: Date
   completedAt?: Date
   error?: string
+  /** 0–100 progress override (used for compute steps without item-level granularity) */
+  progress?: number
+  /** Latest status message (e.g. current ODM stage) */
+  message?: string
+  /** TanStack Router path to navigate to when the user clicks "View" in the panel */
+  link?: string
 }
