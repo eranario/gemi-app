@@ -64,13 +64,6 @@ export function AnalyzeRun() {
   } = useQuery({
     queryKey: ["analyze-traits", runId],
     queryFn: () => analyzeApi.getTraits(runId),
-    select: (data) => {
-      // Auto-select first metric after load
-      if (!selectedMetric && data.metric_columns.length > 0) {
-        setSelectedMetric(data.metric_columns[0])
-      }
-      return data
-    },
   })
 
   const { data: orthoInfo } = useQuery({
@@ -82,6 +75,7 @@ export function AnalyzeRun() {
 
   const geojson = traitsData?.geojson ?? null
   const metricColumns = traitsData?.metric_columns ?? []
+  const effectiveMetric = selectedMetric ?? metricColumns[0] ?? null
 
   const accessions: string[] = useMemo(() => {
     if (!geojson) return []
@@ -168,7 +162,7 @@ export function AnalyzeRun() {
                 <TraitMap
                   geojson={geojson}
                   orthoInfo={orthoInfo ?? null}
-                  selectedMetric={selectedMetric}
+                  selectedMetric={effectiveMetric}
                   filteredIds={filteredIds}
                 />
               </div>
@@ -176,7 +170,7 @@ export function AnalyzeRun() {
                 <RunSidebar
                   run={runMeta}
                   metricColumns={metricColumns}
-                  selectedMetric={selectedMetric}
+                  selectedMetric={effectiveMetric}
                   onMetricChange={setSelectedMetric}
                   accessions={accessions}
                   selectedAccession={selectedAccession}
@@ -213,7 +207,7 @@ export function AnalyzeRun() {
                 <TraitHistogram
                   geojson={geojson}
                   metricColumns={metricColumns}
-                  initialMetric={selectedMetric}
+                  initialMetric={effectiveMetric}
                 />
               </section>
             </div>

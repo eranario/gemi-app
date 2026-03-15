@@ -2,7 +2,7 @@
  * TraitMap — deck.gl + MapLibre map for the Analyze tab.
  *
  * Layers:
- *  1. CartoDB Positron base tiles (MapLibre)
+ *  1. ESRI World Imagery base tiles (MapLibre)
  *  2. BitmapLayer — orthomosaic / combined_mosaic image overlay
  *  3. GeoJsonLayer — plot polygons filled by selected metric via d3 color scale
  *
@@ -14,10 +14,26 @@ import { BitmapLayer, GeoJsonLayer } from "@deck.gl/layers"
 import { Map as MapLibre } from "react-map-gl/maplibre"
 import "maplibre-gl/dist/maplibre-gl.css"
 import { useState, useMemo } from "react"
-import { buildColorScale, percentileRange } from "../utils/colorScale"
+import { X } from "lucide-react"
+import { buildColorScale } from "../utils/colorScale"
 import { ColorLegend } from "./ColorLegend"
 
-const MAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
+// Satellite base → ortho image overlay → trait polygons
+const MAP_STYLE = {
+  version: 8 as const,
+  sources: {
+    "esri-satellite": {
+      type: "raster" as const,
+      tiles: [
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      ],
+      tileSize: 256,
+      attribution: "Tiles © Esri",
+      maxzoom: 19,
+    },
+  },
+  layers: [{ id: "esri-satellite", type: "raster" as const, source: "esri-satellite" }],
+}
 
 function apiUrl(path: string): string {
   const base = (window as any).__GEMI_BACKEND_URL__ ?? ""
@@ -26,8 +42,10 @@ function apiUrl(path: string): string {
 
 interface OrthoInfo {
   available: boolean
-  path: string | null
+  path?: string | null
   bounds: [[number, number], [number, number]] | null // [[s,w],[n,e]]
+  /** Preferred: downscaled JPEG preview (much faster than the full TIF) */
+  preview_url?: string | null
 }
 
 interface TraitMapProps {
@@ -36,6 +54,10 @@ interface TraitMapProps {
   selectedMetric: string | null
   /** Feature ids to highlight (accession filter); null = show all */
   filteredIds: Set<string> | null
+  /** TraitRecord id — used to fetch plot images on click */
+  recordId?: string | null
+  /** When false, polygon layer is hidden */
+  showPolygons?: boolean
 }
 
 interface TooltipState {
@@ -44,10 +66,24 @@ interface TooltipState {
   properties: Record<string, unknown>
 }
 
-export function TraitMap({ geojson, orthoInfo, selectedMetric, filteredIds }: TraitMapProps) {
-  const [tooltip, setTooltip] = useState<TooltipState | null>(null)
+interface PlotImageState {
+  plotId: string
+  x: number
+  y: number
+}
 
-  // Compute color scale from visible features
+export function TraitMap({
+  geojson,
+  orthoInfo,
+  selectedMetric,
+  filteredIds,
+  recordId,
+  showPolygons = true,
+}: TraitMapProps) {
+  const [tooltip, setTooltip] = useState<TooltipState | null>(null)
+  const [plotImage, setPlotImage] = useState<PlotImageState | null>(null)
+
+  // Compute color scale from visible features using quantile normalization
   const { colorFn, minVal, maxVal } = useMemo(() => {
     if (!geojson || !selectedMetric) {
       return { colorFn: null, minVal: 0, maxVal: 1 }
@@ -56,15 +92,20 @@ export function TraitMap({ geojson, orthoInfo, selectedMetric, filteredIds }: Tr
       .filter((f) => filteredIds == null || filteredIds.has(String(f.properties?.plot_id ?? f.properties?.accession ?? "")))
       .map((f) => f.properties?.[selectedMetric] as number)
       .filter((v) => typeof v === "number" && !isNaN(v))
-    const [lo, hi] = percentileRange(values)
-    return { colorFn: buildColorScale(lo, hi, selectedMetric), minVal: lo, maxVal: hi }
+    const { colorFn, min, max } = buildColorScale(values, selectedMetric)
+    return { colorFn, minVal: min, maxVal: max }
   }, [geojson, selectedMetric, filteredIds])
 
   // Bitmap layer for the ortho/mosaic image
   const bitmapLayer = useMemo(() => {
-    if (!orthoInfo?.available || !orthoInfo.bounds || !orthoInfo.path) return null
+    if (!orthoInfo?.available || !orthoInfo.bounds) return null
     const [[south, west], [north, east]] = orthoInfo.bounds
-    const imgUrl = apiUrl(`/api/v1/files/serve?path=${encodeURIComponent(orthoInfo.path)}`)
+    const imgUrl = orthoInfo.preview_url
+      ? apiUrl(orthoInfo.preview_url)
+      : orthoInfo.path
+        ? apiUrl(`/api/v1/files/serve?path=${encodeURIComponent(orthoInfo.path)}`)
+        : null
+    if (!imgUrl) return null
     return new BitmapLayer({
       id: "ortho-bitmap",
       image: imgUrl,
@@ -75,14 +116,15 @@ export function TraitMap({ geojson, orthoInfo, selectedMetric, filteredIds }: Tr
 
   // GeoJSON polygon layer
   const polygonLayer = useMemo(() => {
-    if (!geojson) return null
+    if (!geojson || !showPolygons) return null
     return new GeoJsonLayer({
       id: "trait-polygons",
       data: geojson,
       stroked: true,
       filled: true,
-      lineWidthMinPixels: 1,
-      getLineColor: [255, 255, 255, 120],
+      lineWidthMinPixels: 0.5,
+      lineWidthMaxPixels: 1.5,
+      getLineColor: [255, 255, 255, 60],
       getFillColor: (f: GeoJSON.Feature) => {
         if (filteredIds != null) {
           const pid = String(f.properties?.plot_id ?? f.properties?.accession ?? "")
@@ -103,8 +145,18 @@ export function TraitMap({ geojson, orthoInfo, selectedMetric, filteredIds }: Tr
           setTooltip(null)
         }
       },
+      onClick: (info: any) => {
+        if (info.object && recordId) {
+          const plotId = String(
+            info.object.properties?.plot_id ?? info.object.properties?.accession ?? "",
+          )
+          if (plotId) {
+            setPlotImage({ plotId, x: info.x, y: info.y })
+          }
+        }
+      },
     })
-  }, [geojson, colorFn, selectedMetric, filteredIds])
+  }, [geojson, colorFn, selectedMetric, filteredIds, showPolygons, recordId])
 
   // Compute initial view state from ortho bounds or GeoJSON extent
   const initialViewState = useMemo(() => {
@@ -127,9 +179,10 @@ export function TraitMap({ geojson, orthoInfo, selectedMetric, filteredIds }: Tr
     <div className="relative w-full h-full">
       <DeckGL
         initialViewState={initialViewState}
-        controller
+        controller={{ maxZoom: 24 } as any}
         layers={layers}
         style={{ position: "absolute", inset: "0" }}
+        getCursor={({ isDragging }) => (isDragging ? "grabbing" : recordId && showPolygons ? "pointer" : "grab")}
       >
         <MapLibre mapStyle={MAP_STYLE} />
       </DeckGL>
@@ -138,9 +191,67 @@ export function TraitMap({ geojson, orthoInfo, selectedMetric, filteredIds }: Tr
         <ColorLegend min={minVal} max={maxVal} column={selectedMetric} />
       )}
 
-      {tooltip && (
+      {tooltip && !plotImage && (
         <MapTooltip x={tooltip.x} y={tooltip.y} properties={tooltip.properties} selectedMetric={selectedMetric} />
       )}
+
+      {plotImage && recordId && (
+        <PlotImagePanel
+          recordId={recordId}
+          plotId={plotImage.plotId}
+          x={plotImage.x}
+          y={plotImage.y}
+          onClose={() => setPlotImage(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── Plot image panel ────────────────────────────────────────────────────────────
+
+function PlotImagePanel({
+  recordId,
+  plotId,
+  x,
+  y,
+  onClose,
+}: {
+  recordId: string
+  plotId: string
+  x: number
+  y: number
+  onClose: () => void
+}) {
+  const imgUrl = apiUrl(`/api/v1/analyze/trait-records/${recordId}/plot-image/${plotId}`)
+
+  // Keep panel within the viewport by clamping its position
+  const left = Math.min(x + 12, window.innerWidth - 280)
+  const top = Math.max(y - 8, 8)
+
+  return (
+    <div
+      className="absolute z-30 bg-background/95 backdrop-blur-sm border rounded-lg shadow-xl overflow-hidden"
+      style={{ left, top, width: 240 }}
+    >
+      <div className="flex items-center justify-between px-3 py-2 border-b">
+        <span className="text-xs font-semibold">Plot {plotId}</span>
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      <img
+        src={imgUrl}
+        alt={`Plot ${plotId}`}
+        className="w-full object-contain max-h-48"
+        onError={(e) => {
+          (e.currentTarget as HTMLImageElement).style.display = "none"
+          const p = document.createElement("p")
+          p.className = "text-xs text-muted-foreground text-center py-4 px-3"
+          p.textContent = "Image not available"
+          e.currentTarget.parentElement?.appendChild(p)
+        }}
+      />
     </div>
   )
 }

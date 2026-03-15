@@ -1,5 +1,16 @@
 # Processing Pipeline Implementation Plan
 
+## Recent Changes (2026-03-10)
+
+- **Field Design data type** — added to Files tab upload; directory `Raw/{Experiment}/{Location}/{Population}/FieldDesign/` (no date/platform/sensor). Editable in Manage Data.
+- **Shared Plot Boundary Prep** — replaces separate `plot_marking` (ground) and `plot_boundaries` (aerial) steps. Both pipelines now: draw outer pop boundary → configure grid dimensions from field design → auto-generate `Plot-Boundary-WGS84.geojson`. Ground additionally runs `associate_boundaries` compute step (GPS containment matching of stitched plots → boundary polygons).
+- **Data Sync auto-trigger** — aerial `data_sync` step runs automatically when RunDetail opens; shows "Preparing data…" inline banner with progress.
+- **Full-page interactive tools** — clicking "Open Tool" navigates to `/run/$runId/tool?step=X` full-page view instead of inline expansion.
+- **Manage Data field editing** — three-dot menu on each upload now has "Edit fields" option.
+- **New Run dialog** — only shows processable data types: aerial → Image Data + Orthomosaic; ground → Farm-ng Binary File + Image Data.
+
+---
+
 ## Overview
 
 Implement Ground-based (Amiga) and Aerial (Drone) processing pipelines in the new app, reusing the existing workspace/pipeline layout. The goal is to keep things simple, avoid repetition, and enable workflow reuse across dates.

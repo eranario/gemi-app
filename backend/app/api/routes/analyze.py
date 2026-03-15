@@ -1,9 +1,13 @@
 """
 Analyze endpoints — read-only views of pipeline run outputs.
 
-GET /api/v1/analyze/runs                          list analyzable runs
-GET /api/v1/analyze/runs/{run_id}/traits          GeoJSON + numeric metric columns
-GET /api/v1/analyze/runs/{run_id}/ortho-info      mosaic path + WGS84 bounds
+GET /api/v1/analyze/runs                              list analyzable runs
+GET /api/v1/analyze/runs/{run_id}/traits              GeoJSON + numeric metric columns
+GET /api/v1/analyze/runs/{run_id}/ortho-info          mosaic path + WGS84 bounds
+
+GET /api/v1/analyze/trait-records                     list all TraitRecords (with joins)
+GET /api/v1/analyze/trait-records/{id}/geojson        serve the versioned GeoJSON + columns
+GET /api/v1/analyze/trait-records/{id}/ortho-info     version-specific ortho bounds + preview_url
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from sqlmodel import Session, select
 
 from app.api.deps import CurrentUser, SessionDep
@@ -225,6 +230,193 @@ def get_traits(
         "metric_columns": metric_columns,
         "feature_count": len(features),
     }
+
+
+# ── 4. List TraitRecords ──────────────────────────────────────────────────────
+
+@router.get("/trait-records")
+def list_trait_records(
+    session: SessionDep,
+    current_user: CurrentUser,
+    workspace_id: uuid.UUID | None = None,
+    pipeline_id: uuid.UUID | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Return all TraitRecords with workspace / pipeline / run metadata joined in.
+    Optionally filter by workspace_id or pipeline_id.
+    """
+    from app.models.pipeline import TraitRecord
+
+    records = session.exec(
+        select(TraitRecord).order_by(TraitRecord.created_at.desc())
+    ).all()
+
+    result = []
+    for record in records:
+        run = session.get(PipelineRun, record.run_id)
+        if not run:
+            continue
+        pipeline = session.get(Pipeline, run.pipeline_id)
+        if not pipeline:
+            continue
+        if workspace_id and pipeline.workspace_id != workspace_id:
+            continue
+        if pipeline_id and pipeline.id != pipeline_id:
+            continue
+        workspace = session.get(Workspace, pipeline.workspace_id)
+        result.append({
+            "id": str(record.id),
+            "run_id": str(record.run_id),
+            "pipeline_id": str(pipeline.id),
+            "pipeline_name": pipeline.name,
+            "pipeline_type": pipeline.type,
+            "workspace_id": str(pipeline.workspace_id),
+            "workspace_name": workspace.name if workspace else "",
+            "date": run.date,
+            "experiment": run.experiment,
+            "location": run.location,
+            "population": run.population,
+            "platform": run.platform,
+            "sensor": run.sensor,
+            "ortho_version": record.ortho_version,
+            "ortho_name": record.ortho_name,
+            "boundary_version": record.boundary_version,
+            "boundary_name": record.boundary_name,
+            "plot_count": record.plot_count,
+            "trait_columns": record.trait_columns or [],
+            "vf_avg": record.vf_avg,
+            "height_avg": record.height_avg,
+            "created_at": record.created_at,
+        })
+    return result
+
+
+# ── 5. TraitRecord GeoJSON ────────────────────────────────────────────────────
+
+@router.get("/trait-records/{record_id}/geojson")
+def get_trait_record_geojson(
+    session: SessionDep,
+    current_user: CurrentUser,
+    record_id: uuid.UUID,
+) -> dict[str, Any]:
+    """Return the GeoJSON FeatureCollection for a specific TraitRecord."""
+    from app.models.pipeline import TraitRecord
+
+    record = session.get(TraitRecord, record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Trait record not found")
+
+    run = session.get(PipelineRun, record.run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    pipeline = session.get(Pipeline, run.pipeline_id)
+    workspace = session.get(Workspace, pipeline.workspace_id)
+    paths = RunPaths.from_db(session=session, run=run, workspace=workspace)
+
+    geojson_path = paths.abs(record.geojson_path)
+    if not geojson_path.exists():
+        raise HTTPException(status_code=404, detail="GeoJSON file not found on disk")
+
+    geojson = json.loads(geojson_path.read_text())
+    features = geojson.get("features", [])
+    return {
+        "geojson": geojson,
+        "metric_columns": _numeric_columns(features),
+        "feature_count": len(features),
+    }
+
+
+# ── 6. TraitRecord ortho info (version-specific) ──────────────────────────────
+
+@router.get("/trait-records/{record_id}/ortho-info")
+def get_trait_record_ortho_info(
+    session: SessionDep,
+    current_user: CurrentUser,
+    record_id: uuid.UUID,
+) -> dict[str, Any]:
+    """
+    Return ortho bounds and a preview URL for the specific ortho version
+    that was used when this TraitRecord was created.
+
+    preview_url is the /pipeline-runs/{id}/orthomosaics/{v}/preview endpoint
+    (returns a downscaled JPEG, much faster than serving the full TIF).
+    """
+    from app.models.pipeline import TraitRecord
+
+    record = session.get(TraitRecord, record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Trait record not found")
+
+    run = session.get(PipelineRun, record.run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    pipeline = session.get(Pipeline, run.pipeline_id)
+    workspace = session.get(Workspace, pipeline.workspace_id)
+    paths = RunPaths.from_db(session=session, run=run, workspace=workspace)
+    outputs = run.outputs or {}
+
+    not_available: dict[str, Any] = {"available": False, "bounds": None, "preview_url": None}
+
+    if pipeline and pipeline.type == "aerial":
+        orthos = outputs.get("orthomosaics", [])
+        target_v = record.ortho_version
+        ortho = next((o for o in orthos if o["version"] == target_v), None)
+        if not ortho:
+            return not_available
+        tif_rel = ortho.get("pyramid") or ortho.get("rgb")
+        if not tif_rel:
+            return not_available
+        tif = paths.abs(tif_rel)
+        if not tif.exists():
+            return not_available
+        preview_url = f"/api/v1/pipeline-runs/{run.id}/orthomosaics/{target_v}/preview"
+    else:
+        geo_rel = outputs.get("georeferencing")
+        if not geo_rel:
+            return not_available
+        tif = paths.abs(geo_rel) / "combined_mosaic.tif"
+        if not tif.exists():
+            return not_available
+        preview_url = f"/api/v1/files/serve?path={tif}"
+
+    bounds = _read_tif_bounds(tif)
+    return {"available": True, "bounds": bounds, "preview_url": preview_url}
+
+
+# ── 7. TraitRecord plot image ─────────────────────────────────────────────────
+
+@router.get("/trait-records/{record_id}/plot-image/{plot_id}")
+def get_trait_record_plot_image(
+    session: SessionDep,
+    current_user: CurrentUser,
+    record_id: uuid.UUID,
+    plot_id: str,
+) -> FileResponse:
+    """
+    Serve the cropped PNG for a single plot from the trait record's run.
+    Image is at Processed/.../cropped_images/plot_{plot_id}.png
+    """
+    from app.models.pipeline import TraitRecord
+
+    record = session.get(TraitRecord, record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Trait record not found")
+
+    run = session.get(PipelineRun, record.run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    pipeline = session.get(Pipeline, run.pipeline_id)
+    workspace = session.get(Workspace, pipeline.workspace_id)
+    paths = RunPaths.from_db(session=session, run=run, workspace=workspace)
+
+    img_path = paths.cropped_images_dir / f"plot_{plot_id}.png"
+    if not img_path.exists():
+        raise HTTPException(status_code=404, detail=f"Plot image not found: plot_{plot_id}.png")
+
+    return FileResponse(str(img_path), media_type="image/png")
 
 
 def _extract_plot_id(filename: str) -> str | None:

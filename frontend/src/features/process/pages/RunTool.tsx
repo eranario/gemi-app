@@ -10,7 +10,7 @@ import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { useQueryClient } from "@tanstack/react-query"
 
-import { PipelinesService, type PipelineRunPublic } from "@/client"
+import { PipelinesService, type PipelineRunPublic, type PipelinePublic } from "@/client"
 import { Button } from "@/components/ui/button"
 import { GcpPicker } from "@/features/process/components/GcpPicker"
 import { PlotBoundaryPrep } from "@/features/process/components/PlotBoundaryPrep"
@@ -49,6 +49,16 @@ export function RunTool() {
     refetchOnWindowFocus: false,
   })
 
+  const { data: pipeline } = useQuery<PipelinePublic>({
+    queryKey: ["pipelines", run?.pipeline_id],
+    queryFn: () => PipelinesService.readOne({ id: run!.pipeline_id }),
+    enabled: !!run?.pipeline_id,
+    staleTime: Infinity,
+  })
+
+  const pipelineRoboflowModels: import("@/features/process/components/InferenceTool").ModelConfig[] | undefined =
+    (pipeline?.config as any)?.roboflow_models ?? undefined
+
   const executeMutation = useMutation({
     mutationFn: (body: { step: string; models?: { label: string; roboflow_api_key: string; roboflow_model_id: string; task_type: string }[] }) =>
       ProcessingService.executeStep({ id: runId, requestBody: body }),
@@ -65,6 +75,7 @@ export function RunTool() {
 
   function onSaved() {
     queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] })
+    queryClient.invalidateQueries({ queryKey: ["plot-boundaries", runId] })
     goBack()
   }
 
@@ -115,6 +126,7 @@ export function RunTool() {
               executeMutation.mutate({ step: "inference", models: cfg.models })
             }}
             onCancel={goBack}
+            initialModels={pipelineRoboflowModels}
           />
         )}
       </div>

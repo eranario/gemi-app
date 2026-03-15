@@ -2,6 +2,23 @@
 #[cfg(not(debug_assertions))]
 mod sidecar_manager;
 
+/// Fetch `url` (GET or POST) and write the response body to `dest` on disk.
+#[tauri::command]
+async fn download_to_file(url: String, dest: String, method: Option<String>) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    let req = match method.as_deref().unwrap_or("POST") {
+        "GET" => client.get(&url),
+        _ => client.post(&url),
+    };
+    let response = req.send().await.map_err(|e| e.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("Server returned {}", response.status()));
+    }
+    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+    std::fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(debug_assertions)]
@@ -12,6 +29,7 @@ pub fn run() {
         tauri::Builder::default()
             .plugin(tauri_plugin_shell::init())
             .plugin(tauri_plugin_dialog::init())
+            .invoke_handler(tauri::generate_handler![download_to_file])
             .setup(|app| {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -37,6 +55,7 @@ pub fn run() {
         tauri::Builder::default()
             .plugin(tauri_plugin_shell::init())
             .plugin(tauri_plugin_dialog::init())
+            .invoke_handler(tauri::generate_handler![download_to_file])
             .setup(move |app| {
                 let app_handle = app.handle().clone();
 

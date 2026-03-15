@@ -12,12 +12,16 @@ import {
   Download,
   Eye,
   TriangleAlert,
-  Star,
   Trash2,
-  Layers,
+  ImageIcon,
+  Zap,
+  Pencil,
+  X,
 } from "lucide-react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { save as tauriSaveDialog } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
@@ -53,6 +57,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import useCustomToast from "@/hooks/useCustomToast";
 import { useProcess } from "@/contexts/ProcessContext";
 
@@ -61,6 +68,25 @@ import { useProcess } from "@/contexts/ProcessContext";
 function apiUrl(path: string): string {
   const base = (window as any).__GEMI_BACKEND_URL__ ?? "";
   return base ? `${base}${path}` : path;
+}
+
+/** Always returns a full http:// URL — for use with Rust/reqwest which needs absolute URLs. */
+function absoluteApiUrl(path: string): string {
+  const base = (window as any).__GEMI_BACKEND_URL__ ?? "http://127.0.0.1:8000";
+  return path.startsWith("http") ? path : `${base}${path}`;
+}
+
+/** Show a Tauri save dialog then download the URL to the chosen path. Returns false if cancelled. */
+async function tauriDownload(
+  url: string,
+  filename: string,
+  method: "GET" | "POST" = "GET",
+  filters?: { name: string; extensions: string[] }[]
+): Promise<boolean> {
+  const dest = await tauriSaveDialog({ defaultPath: filename, filters });
+  if (!dest) return false;
+  await invoke("download_to_file", { url: absoluteApiUrl(url), dest, method });
+  return true;
 }
 
 // ── Step definitions ──────────────────────────────────────────────────────────
@@ -141,14 +167,14 @@ const AERIAL_STEPS: StepDef[] = [
   },
   {
     key: "trait_extraction",
-    label: "Trait Extraction",
+    label: "Initial Trait Extraction",
     description: "Extract vegetation fraction and height per plot",
     kind: "compute",
   },
   {
     key: "inference",
     label: "Inference",
-    description: "Roboflow detection/segmentation on split plot images",
+    description: "Roboflow detection/segmentation on plot images",
     kind: "interactive",
   },
 ];
@@ -325,12 +351,12 @@ function ProgressLog({ events }: { events: ProgressEvent[] }) {
       )}
       <div
         ref={ref}
-        className="bg-muted/60 max-h-48 space-y-0.5 overflow-y-auto rounded-md p-3 font-mono text-xs"
+        className="bg-muted/60 max-h-48 space-y-0.5 overflow-x-hidden overflow-y-auto rounded-md p-3 font-mono text-xs"
       >
         {visibleEvents.map((e, i) => (
           <div
             key={i}
-            className={
+            className={`break-all ${
               e.event === "error"
                 ? "text-red-500"
                 : e.event === "complete"
@@ -338,7 +364,7 @@ function ProgressLog({ events }: { events: ProgressEvent[] }) {
                   : e.event === "log"
                     ? "text-muted-foreground/60"
                     : "text-foreground"
-            }
+            }`}
           >
             {e.event === "log"
               ? e.message
@@ -369,6 +395,7 @@ interface StepRowProps {
   isExecuting: boolean;
   isStopping: boolean;
   warning?: string;
+  extraContent?: React.ReactNode;
 }
 
 function StepRow({
@@ -384,6 +411,7 @@ function StepRow({
   isExecuting,
   isStopping,
   warning,
+  extraContent,
 }: StepRowProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -441,7 +469,7 @@ function StepRow({
           {iconEl}
         </div>
 
-        <div className="flex-1 pb-6">
+        <div className="min-w-0 flex-1 pb-6">
           <div className="flex items-start justify-between gap-2 pt-2">
             <div className="flex flex-wrap items-center gap-2">
               <span
@@ -521,9 +549,14 @@ function StepRow({
 
           {/* Live progress for running step, or persisted log for failed step */}
           {(isActive || status === "failed") && (
-            <div className="mt-2">
+            <div className="mt-2 overflow-hidden">
               {isActive && lastProgress !== null && (
-                <Progress value={lastProgress} className="mb-1 h-1.5" />
+                <div className="bg-secondary mb-1 h-1.5 w-full overflow-hidden rounded-full">
+                  <div
+                    className="bg-primary h-full rounded-full transition-[width] duration-300"
+                    style={{ width: `${lastProgress}%` }}
+                  />
+                </div>
               )}
               <ProgressLog events={stepEvents} />
             </div>
@@ -533,9 +566,539 @@ function StepRow({
           {expanded && status === "completed" && stepEvents.length > 0 && (
             <ProgressLog events={stepEvents} />
           )}
+
+          {/* Extra inline content (e.g. ortho versions) — always visible when completed */}
+          {status === "completed" && extraContent && <div>{extraContent}</div>}
         </div>
       </div>
     </div>
+  );
+}
+
+// ── Orthomosaic version viewer + inline panel ────────────────────────────────
+
+interface OrthoVersion {
+  version: number;
+  name: string | null;
+  rgb: string | null;
+  dem: string | null;
+  pyramid: string | null;
+  created_at: string | null;
+  active: boolean;
+  has_crops: boolean;
+}
+
+interface PlotBoundaryVersion {
+  version: number;
+  name: string | null;
+  geojson_path: string;
+  ortho_version: number | null;
+  created_at: string | null;
+  active: boolean;
+}
+
+function OrthoViewerDialog({
+  open,
+  onClose,
+  runId,
+  version,
+}: {
+  open: boolean;
+  onClose: () => void;
+  runId: string;
+  version: OrthoVersion | null;
+}) {
+  const [highResLoaded, setHighResLoaded] = useState(false);
+  const [highResLoading, setHighResLoading] = useState(false);
+
+  if (!version) return null;
+  const v = version; // narrowed non-null reference for use in callbacks
+
+  const previewUrl = apiUrl(
+    `/api/v1/pipeline-runs/${runId}/orthomosaics/${version.version}/preview?max_size=2000`
+  );
+  const highResUrl = apiUrl(
+    `/api/v1/pipeline-runs/${runId}/orthomosaics/${version.version}/preview?max_size=8000`
+  );
+
+  function downloadTif() {
+    const rel = v.rgb;
+    if (!rel) return;
+    const url = apiUrl(
+      `/api/v1/files/serve?path=${encodeURIComponent(rel)}&download=1`
+    );
+    const filename = rel.split("/").pop() ?? `ortho_v${v.version}.tif`;
+    tauriDownload(url, filename, "GET", [
+      { name: "GeoTIFF", extensions: ["tif", "tiff"] },
+    ]);
+  }
+
+  function downloadJpeg(hires = false) {
+    const url = hires ? highResUrl : previewUrl;
+    const filename = `ortho_v${v.version}${hires ? "_hires" : "_preview"}.jpg`;
+    tauriDownload(url, filename, "GET", [
+      { name: "JPEG Image", extensions: ["jpg", "jpeg"] },
+    ]);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>
+            {version.name ? version.name : `Orthomosaic v${version.version}`}
+            {version.name && (
+              <span className="text-muted-foreground ml-2 text-sm font-normal">
+                v{version.version}
+              </span>
+            )}
+          </DialogTitle>
+          <DialogDescription>
+            {version.created_at
+              ? `Generated ${new Date(version.created_at).toLocaleString()}`
+              : "Orthomosaic preview"}
+            {version.active && " · Active version"}
+          </DialogDescription>
+        </DialogHeader>
+
+        <Tabs defaultValue="preview">
+          <div className="flex items-center justify-between">
+            <TabsList>
+              <TabsTrigger value="preview">
+                <ImageIcon className="mr-1.5 h-3.5 w-3.5" />
+                Preview
+              </TabsTrigger>
+              <TabsTrigger value="hires">
+                <Zap className="mr-1.5 h-3.5 w-3.5" />
+                High-res
+              </TabsTrigger>
+            </TabsList>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => downloadJpeg(false)}
+              >
+                <Download className="mr-1.5 h-3.5 w-3.5" />
+                JPEG
+              </Button>
+              {version.rgb && (
+                <Button variant="outline" size="sm" onClick={downloadTif}>
+                  <Download className="mr-1.5 h-3.5 w-3.5" />
+                  GeoTIFF
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <TabsContent value="preview" className="mt-3">
+            <div className="bg-muted/40 overflow-hidden rounded-lg border">
+              <img
+                src={previewUrl}
+                alt={`Orthomosaic v${version.version} preview`}
+                className="max-h-[60vh] w-full object-contain"
+              />
+            </div>
+            <p className="text-muted-foreground mt-1.5 text-xs">
+              Low-res preview (≤ 2000 px). Switch to High-res tab for a sharper
+              image.
+            </p>
+          </TabsContent>
+
+          <TabsContent value="hires" className="mt-3">
+            {!highResLoaded ? (
+              <div className="bg-muted/40 flex flex-col items-center justify-center gap-3 rounded-lg border py-16">
+                <Zap className="text-muted-foreground h-8 w-8" />
+                <p className="text-sm font-medium">
+                  High-res preview not generated yet
+                </p>
+                <p className="text-muted-foreground text-xs">
+                  Rendering at up to 8000 px may take a moment for large
+                  orthomosaics.
+                </p>
+                <Button
+                  size="sm"
+                  disabled={highResLoading}
+                  onClick={() => {
+                    setHighResLoading(true);
+                    setHighResLoaded(true);
+                  }}
+                >
+                  {highResLoading ? (
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Zap className="mr-1.5 h-3.5 w-3.5" />
+                  )}
+                  Generate High-res Preview
+                </Button>
+              </div>
+            ) : (
+              <div className="bg-muted/40 overflow-hidden rounded-lg border">
+                <img
+                  src={highResUrl}
+                  alt={`Orthomosaic v${version.version} high-res`}
+                  className="max-h-[60vh] w-full object-contain"
+                  onLoad={() => setHighResLoading(false)}
+                />
+                {highResLoading && (
+                  <div className="text-muted-foreground flex items-center justify-center gap-2 p-4 text-sm">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Rendering…
+                  </div>
+                )}
+              </div>
+            )}
+            {highResLoaded && (
+              <p className="text-muted-foreground mt-1.5 text-xs">
+                High-res preview (≤ 8000 px).{" "}
+                <button
+                  className="underline hover:no-underline"
+                  onClick={() => downloadJpeg(true)}
+                >
+                  Download as JPEG
+                </button>
+              </p>
+            )}
+          </TabsContent>
+        </Tabs>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function OrthoVersionsPanel({
+  runId,
+  versions,
+  onDelete,
+  onRename,
+  isDeleting,
+}: {
+  runId: string;
+  versions: OrthoVersion[];
+  onDelete: (version: number) => void;
+  onRename: (version: number, name: string) => void;
+  isDeleting: boolean;
+}) {
+  const [viewingVersion, setViewingVersion] = useState<OrthoVersion | null>(
+    null
+  );
+  const [editingVersion, setEditingVersion] = useState<number | null>(null);
+  const [editingName, setEditingName] = useState("");
+
+  const sorted = [...versions].sort((a, b) => b.version - a.version);
+
+  function startRename(v: OrthoVersion) {
+    setEditingVersion(v.version);
+    setEditingName(v.name ?? "");
+  }
+
+  function commitRename() {
+    if (editingVersion !== null) {
+      onRename(editingVersion, editingName);
+    }
+    setEditingVersion(null);
+  }
+
+  return (
+    <>
+      <div className="mt-3 rounded-lg border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Version</TableHead>
+              <TableHead>Created</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sorted.map((v) => (
+              <TableRow key={v.version}>
+                <TableCell className="font-medium">
+                  {editingVersion === v.version ? (
+                    <div className="flex items-center gap-1">
+                      <Input
+                        className="h-7 w-36 text-sm"
+                        value={editingName}
+                        autoFocus
+                        placeholder={`v${v.version}`}
+                        onChange={(e) => setEditingName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitRename();
+                          if (e.key === "Escape") setEditingVersion(null);
+                        }}
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={commitRename}
+                      >
+                        <Check className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => setEditingVersion(null)}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <button
+                      className="flex items-center gap-1 hover:underline"
+                      onClick={() => startRename(v)}
+                      title="Click to rename"
+                    >
+                      <span>{v.name ?? `v${v.version}`}</span>
+                      {v.name && (
+                        <span className="text-muted-foreground text-xs">
+                          v{v.version}
+                        </span>
+                      )}
+                    </button>
+                  )}
+                </TableCell>
+                <TableCell className="text-muted-foreground text-sm">
+                  {v.created_at ? new Date(v.created_at).toLocaleString() : "—"}
+                </TableCell>
+                <TableCell className="text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      title="View orthomosaic"
+                      onClick={() => setViewingVersion(v)}
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      title="Rename"
+                      onClick={() => startRename(v)}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-red-500 hover:text-red-600"
+                      disabled={isDeleting}
+                      onClick={() => onDelete(v.version)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+
+      <OrthoViewerDialog
+        open={viewingVersion !== null}
+        onClose={() => setViewingVersion(null)}
+        runId={runId}
+        version={viewingVersion}
+      />
+    </>
+  );
+}
+
+// ── Plot boundary versions panel ──────────────────────────────────────────────
+
+function PlotBoundaryVersionsPanel({
+  versions,
+  orthoVersions,
+  onRename,
+  downloadingCropsBv,
+  onDownloadCrops,
+}: {
+  versions: PlotBoundaryVersion[];
+  orthoVersions: OrthoVersion[];
+  onRename: (version: number, name: string) => void;
+  downloadingCropsBv: number | null;
+  onDownloadCrops: (boundaryVersion: number, orthoVersion: number) => void;
+}) {
+  const [editingVersion, setEditingVersion] = useState<number | null>(null);
+  const [editingName, setEditingName] = useState("");
+  const [cropDialog, setCropDialog] = useState<{
+    boundaryVersion: number;
+  } | null>(null);
+  const [selectedOrthoForCrop, setSelectedOrthoForCrop] = useState<
+    number | null
+  >(null);
+
+  const sorted = [...versions].sort((a, b) => b.version - a.version);
+
+  function startRename(v: PlotBoundaryVersion) {
+    setEditingVersion(v.version);
+    setEditingName(v.name ?? "");
+  }
+
+  function commitRename() {
+    if (editingVersion !== null) onRename(editingVersion, editingName);
+    setEditingVersion(null);
+  }
+
+  function openCropDialog(bv: number) {
+    setCropDialog({ boundaryVersion: bv });
+    setSelectedOrthoForCrop(orthoVersions[0]?.version ?? null);
+  }
+
+  function confirmCropDownload() {
+    if (!cropDialog || selectedOrthoForCrop == null) return;
+    onDownloadCrops(cropDialog.boundaryVersion, selectedOrthoForCrop);
+    setCropDialog(null);
+  }
+
+  return (
+    <>
+      <div className="mt-3 rounded-lg border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Version</TableHead>
+              <TableHead>Ortho Used</TableHead>
+              <TableHead>Created</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sorted.map((v) => (
+              <TableRow key={v.version}>
+                <TableCell className="font-medium">
+                  {editingVersion === v.version ? (
+                    <div className="flex items-center gap-1">
+                      <Input
+                        className="h-7 w-36 text-sm"
+                        value={editingName}
+                        autoFocus
+                        placeholder={`v${v.version}`}
+                        onChange={(e) => setEditingName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitRename();
+                          if (e.key === "Escape") setEditingVersion(null);
+                        }}
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={commitRename}
+                      >
+                        <Check className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => setEditingVersion(null)}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <button
+                      className="flex items-center gap-1 hover:underline"
+                      onClick={() => startRename(v)}
+                      title="Click to rename"
+                    >
+                      <span>{v.name ?? `v${v.version}`}</span>
+                      {v.name && (
+                        <span className="text-muted-foreground text-xs">
+                          v{v.version}
+                        </span>
+                      )}
+                    </button>
+                  )}
+                </TableCell>
+                <TableCell className="text-muted-foreground text-sm">
+                  {v.ortho_version != null ? `v${v.ortho_version}` : "—"}
+                </TableCell>
+                <TableCell className="text-muted-foreground text-sm">
+                  {v.created_at ? new Date(v.created_at).toLocaleString() : "—"}
+                </TableCell>
+                <TableCell className="text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      title="Download crops"
+                      disabled={
+                        downloadingCropsBv === v.version ||
+                        orthoVersions.length === 0
+                      }
+                      onClick={() => openCropDialog(v.version)}
+                    >
+                      {downloadingCropsBv === v.version ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Download className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      title="Rename"
+                      onClick={() => startRename(v)}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* Ortho selection dialog for crop download */}
+      <Dialog
+        open={cropDialog !== null}
+        onOpenChange={(open) => !open && setCropDialog(null)}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Select Orthomosaic</DialogTitle>
+            <DialogDescription>
+              Choose which orthomosaic version to use for cropping the plots.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <select
+              className="border-input bg-background w-full rounded border px-3 py-2 text-sm"
+              value={selectedOrthoForCrop ?? ""}
+              onChange={(e) => setSelectedOrthoForCrop(Number(e.target.value))}
+            >
+              {orthoVersions.map((ov) => (
+                <option key={ov.version} value={ov.version}>
+                  {ov.name ? `${ov.name} (v${ov.version})` : `v${ov.version}`}
+                </option>
+              ))}
+            </select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCropDialog(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmCropDownload}
+              disabled={selectedOrthoForCrop == null}
+            >
+              <Download className="mr-1.5 h-4 w-4" />
+              Download Crops
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -608,10 +1171,8 @@ function OutputsTable({
   function handleDownload(relPath: string) {
     const abs = absPath(relPath);
     const url = apiUrl(`/api/v1/files/serve?path=${encodeURIComponent(abs)}`);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = relPath.split("/").pop() ?? relPath;
-    a.click();
+    const filename = relPath.split("/").pop() ?? relPath;
+    tauriDownload(url, filename, "GET");
   }
 
   return (
@@ -684,6 +1245,9 @@ export function RunDetail() {
   const queryClient = useQueryClient();
   const { addProcess, updateProcess, processes } = useProcess();
   const orthoProcessIdRef = useRef<string | null>(null);
+  const traitProcessIdRef = useRef<string | null>(null);
+  // Set when the user clicks Stop — so DB sync effects know to show "Cancelled" not "Done"
+  const stopWasRequestedRef = useRef(false);
 
   const { data: run, isLoading: runLoading } = useQuery<PipelineRunPublic>({
     queryKey: ["pipeline-runs", runId],
@@ -727,15 +1291,6 @@ export function RunDetail() {
     staleTime: 60_000,
   });
   // Orthomosaic versions (aerial only)
-  interface OrthoVersion {
-    version: number;
-    rgb: string | null;
-    dem: string | null;
-    pyramid: string | null;
-    created_at: string | null;
-    active: boolean;
-  }
-
   const { data: orthoVersions, refetch: refetchOrthoVersions } = useQuery<
     OrthoVersion[]
   >({
@@ -749,31 +1304,6 @@ export function RunDetail() {
     enabled:
       !!run && pipelineType === "aerial" && !!run.steps_completed?.orthomosaic,
     staleTime: 30_000,
-  });
-
-  const activateOrthoMutation = useMutation({
-    mutationFn: (version: number) =>
-      fetch(
-        apiUrl(
-          `/api/v1/pipeline-runs/${runId}/orthomosaics/${version}/activate`
-        ),
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
-          },
-        }
-      ).then((r) => {
-        if (!r.ok) throw new Error("Failed to activate version");
-        return r.json();
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["orthomosaic-versions", runId],
-      });
-      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
-    },
-    onError: () => showErrorToast("Failed to activate orthomosaic version"),
   });
 
   const deleteOrthoMutation = useMutation({
@@ -794,6 +1324,69 @@ export function RunDetail() {
       queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
     },
     onError: () => showErrorToast("Failed to delete orthomosaic version"),
+  });
+
+  const renameOrthoMutation = useMutation({
+    mutationFn: ({ version, name }: { version: number; name: string }) =>
+      fetch(
+        apiUrl(`/api/v1/pipeline-runs/${runId}/orthomosaics/${version}/rename`),
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+          },
+          body: JSON.stringify({ name }),
+        }
+      ).then((r) => {
+        if (!r.ok) throw new Error("Failed to rename version");
+        return r.json();
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["orthomosaic-versions", runId],
+      });
+    },
+    onError: () => showErrorToast("Failed to rename orthomosaic version"),
+  });
+
+  // Plot boundary versions (aerial only)
+  const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
+    useQuery<PlotBoundaryVersion[]>({
+      queryKey: ["plot-boundaries", runId],
+      queryFn: () =>
+        fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/plot-boundaries`), {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+          },
+        }).then((r) => r.json()),
+      enabled:
+        !!run &&
+        pipelineType === "aerial" &&
+        !!run.steps_completed?.plot_boundary_prep,
+      refetchInterval: false,
+    });
+
+  const renamePlotBoundaryMutation = useMutation({
+    mutationFn: ({ version, name }: { version: number; name: string }) =>
+      fetch(
+        apiUrl(
+          `/api/v1/pipeline-runs/${runId}/plot-boundaries/${version}/rename`
+        ),
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+          },
+          body: JSON.stringify({ name }),
+        }
+      ).then((r) => {
+        if (!r.ok) throw new Error("Failed to rename version");
+        return r.json();
+      }),
+    onSuccess: () => refetchPlotBoundaryVersions(),
+    onError: () => showErrorToast("Failed to rename plot boundary version"),
   });
 
   const steps = pipelineType === "aerial" ? AERIAL_STEPS : GROUND_STEPS;
@@ -859,15 +1452,20 @@ export function RunDetail() {
 
   // Stop mutation
   const stopMutation = useMutation({
-    mutationFn: () => ProcessingService.stopStep({ id: runId }),
+    mutationFn: () => {
+      stopWasRequestedRef.current = true;
+      return ProcessingService.stopStep({ id: runId });
+    },
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] }),
     onError: () => showErrorToast("Failed to stop step"),
   });
 
-  // Feed orthomosaic SSE events into the ProcessPanel
+  // Feed SSE events into ProcessPanel for the active long-running step
   useEffect(() => {
-    const pid = orthoProcessIdRef.current;
+    const orthoId = orthoProcessIdRef.current;
+    const traitId = traitProcessIdRef.current;
+    const pid = orthoId ?? traitId;
     if (!pid || !progressEvents.length) return;
     const latest = progressEvents[progressEvents.length - 1];
     if (latest.event === "complete") {
@@ -877,7 +1475,11 @@ export function RunDetail() {
         message: "Done",
       });
     } else if (latest.event === "error" || latest.event === "cancelled") {
-      updateProcess(pid, { status: "error", message: latest.message });
+      const msg = latest.event === "cancelled" ? "Cancelled" : latest.message;
+      updateProcess(pid, { status: "error", message: msg });
+      // Clear refs so the DB sync effect can't later overwrite with "Done"
+      if (pid === orthoId) orthoProcessIdRef.current = null;
+      if (pid === traitId) traitProcessIdRef.current = null;
     } else if (latest.event === "progress") {
       updateProcess(pid, {
         ...(typeof latest.progress === "number"
@@ -904,16 +1506,28 @@ export function RunDetail() {
   useEffect(() => {
     const pid = orthoProcessIdRef.current;
     if (!run) return;
-    if (run.steps_completed?.orthomosaic && runStatus !== "running") {
-      if (pid) {
-        updateProcess(pid, {
-          status: "completed",
-          progress: 100,
-          message: "Done",
-        });
+    const wasStopped = stopWasRequestedRef.current;
+    if (runStatus !== "running" && run.current_step !== "orthomosaic") {
+      if (run.steps_completed?.orthomosaic) {
+        if (pid) {
+          if (wasStopped) {
+            updateProcess(pid, { status: "error", message: "Cancelled" });
+            stopWasRequestedRef.current = false;
+          } else {
+            updateProcess(pid, {
+              status: "completed",
+              progress: 100,
+              message: "Done",
+            });
+          }
+          orthoProcessIdRef.current = null;
+        }
+        refetchOrthoVersions();
+      } else if (wasStopped && pid) {
+        updateProcess(pid, { status: "error", message: "Cancelled" });
+        stopWasRequestedRef.current = false;
         orthoProcessIdRef.current = null;
       }
-      refetchOrthoVersions();
     } else if (runStatus === "failed" && run.current_step === "orthomosaic") {
       if (pid) {
         updateProcess(pid, { status: "error", message: run.error ?? "Failed" });
@@ -929,11 +1543,85 @@ export function RunDetail() {
     updateProcess,
   ]);
 
+  // Sync ProcessPanel from DB run status for trait extraction
+  useEffect(() => {
+    const pid = traitProcessIdRef.current;
+    if (!run || !pid) return;
+    const wasStopped = stopWasRequestedRef.current;
+    if (runStatus !== "running" && run.current_step !== "trait_extraction") {
+      if (run.steps_completed?.trait_extraction && !wasStopped) {
+        updateProcess(pid, {
+          status: "completed",
+          progress: 100,
+          message: "Done",
+        });
+      } else if (
+        wasStopped ||
+        (!run.steps_completed?.trait_extraction && runStatus !== "failed")
+      ) {
+        // Stopped mid-run (step not completed) or stop flag set
+        updateProcess(pid, { status: "error", message: "Cancelled" });
+        stopWasRequestedRef.current = false;
+      }
+      if (run.steps_completed?.trait_extraction || wasStopped) {
+        traitProcessIdRef.current = null;
+      }
+    } else if (
+      runStatus === "failed" &&
+      run.current_step === "trait_extraction"
+    ) {
+      updateProcess(pid, { status: "error", message: run.error ?? "Failed" });
+      traitProcessIdRef.current = null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    runStatus,
+    run?.steps_completed?.trait_extraction,
+    run?.current_step,
+    run?.error,
+    updateProcess,
+  ]);
+
   // Docker check dialog (shown when user tries to run orthomosaic without Docker)
   const [showDockerDialog, setShowDockerDialog] = useState(false);
 
+  // Orthomosaic name prompt
+  const [showOrthoNameDialog, setShowOrthoNameDialog] = useState(false);
+  const [orthoNameInput, setOrthoNameInput] = useState("");
+
+  // Trait extraction version selection dialog
+  const [showTraitDialog, setShowTraitDialog] = useState(false);
+  const [traitOrthoVersion, setTraitOrthoVersion] = useState<number | null>(
+    null
+  );
+  const [traitBoundaryVersion, setTraitBoundaryVersion] = useState<
+    number | null
+  >(null);
+
   // Guarded step runner — checks Docker availability before starting orthomosaic
   async function handleRunStep(step: string) {
+    if (step === "trait_extraction") {
+      // If there are versioned orthos or boundaries, prompt which to use
+      const hasMultipleOrthos = (orthoVersions?.length ?? 0) > 1;
+      const hasMultipleBoundaries = (plotBoundaryVersions?.length ?? 0) > 1;
+      if (hasMultipleOrthos || hasMultipleBoundaries) {
+        setTraitOrthoVersion(orthoVersions?.[0]?.version ?? null);
+        setTraitBoundaryVersion(plotBoundaryVersions?.[0]?.version ?? null);
+        setShowTraitDialog(true);
+        return;
+      }
+      // Single versions — just run with defaults (backend uses active)
+      stopWasRequestedRef.current = false;
+      traitProcessIdRef.current = addProcess({
+        type: "processing",
+        title: `Trait Extraction (${pipeline?.name ?? "Pipeline"} · ${run?.date})`,
+        status: "running",
+        items: [],
+        link: `/process/${workspaceId}/run/${runId}`,
+      });
+      executeMutation.mutate({ step });
+      return;
+    }
     if (step === "orthomosaic") {
       try {
         const result = await UtilsService.dockerCheck();
@@ -944,16 +1632,46 @@ export function RunDetail() {
       } catch {
         // If the check itself fails, let the step run and surface the error via SSE
       }
-      // Register in the background ProcessPanel
-      orthoProcessIdRef.current = addProcess({
-        type: "processing",
-        title: `Orthomosaic (${pipeline?.name ?? "Pipeline"} · ${run?.date})`,
-        status: "running",
-        items: [],
-        link: `/process/${workspaceId}/run/${runId}`,
-      });
+      // Prompt for a name before starting
+      setOrthoNameInput("");
+      setShowOrthoNameDialog(true);
+      return;
     }
     executeMutation.mutate({ step });
+  }
+
+  function startOrthoWithName() {
+    setShowOrthoNameDialog(false);
+    stopWasRequestedRef.current = false;
+    // Register in the background ProcessPanel
+    orthoProcessIdRef.current = addProcess({
+      type: "processing",
+      title: `Orthomosaic (${pipeline?.name ?? "Pipeline"} · ${run?.date})`,
+      status: "running",
+      items: [],
+      link: `/process/${workspaceId}/run/${runId}`,
+    });
+    executeMutation.mutate({
+      step: "orthomosaic",
+      ortho_name: orthoNameInput.trim() || undefined,
+    } as any);
+  }
+
+  function startTraitExtraction() {
+    setShowTraitDialog(false);
+    stopWasRequestedRef.current = false;
+    traitProcessIdRef.current = addProcess({
+      type: "processing",
+      title: `Trait Extraction (${pipeline?.name ?? "Pipeline"} · ${run?.date})`,
+      status: "running",
+      items: [],
+      link: `/process/${workspaceId}/run/${runId}`,
+    });
+    executeMutation.mutate({
+      step: "trait_extraction",
+      ortho_version: traitOrthoVersion ?? undefined,
+      boundary_version: traitBoundaryVersion ?? undefined,
+    } as any);
   }
 
   // Use uploaded orthomosaic (aerial: skip ODM)
@@ -987,34 +1705,98 @@ export function RunDetail() {
   }
 
   // Download crops
-  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadingCropsVersion, setDownloadingCropsVersion] = useState<
+    number | null
+  >(null);
+  const [downloadingCropsBv, setDownloadingCropsBv] = useState<number | null>(
+    null
+  );
   const hasCrops = !!(
     run?.outputs?.stitching ||
     run?.outputs?.cropped_images ||
     run?.outputs?.traits
   );
 
-  async function handleDownloadCrops() {
-    setIsDownloading(true);
+  async function _fetchAndTriggerDownload(
+    url: string,
+    fallbackFilename: string
+  ): Promise<boolean> {
+    const dest = await tauriSaveDialog({
+      defaultPath: fallbackFilename,
+      filters: [{ name: "ZIP Archive", extensions: ["zip"] }],
+    });
+    if (!dest) return false; // user cancelled
+    await invoke("download_to_file", { url: absoluteApiUrl(url), dest });
+    return true;
+  }
+
+  async function handleDownloadCrops(orthoVersion?: number) {
+    setDownloadingCropsVersion(orthoVersion ?? -1);
+    const pid = addProcess({
+      type: "processing",
+      title: "Downloading crops…",
+      status: "running",
+      items: [],
+      progress: 50,
+    });
     try {
-      const res = await fetch(
-        apiUrl(`/api/v1/pipeline-runs/${runId}/download-crops`),
-        { method: "POST" }
+      const url =
+        orthoVersion != null
+          ? apiUrl(
+              `/api/v1/pipeline-runs/${runId}/download-crops?ortho_version=${orthoVersion}`
+            )
+          : apiUrl(`/api/v1/pipeline-runs/${runId}/download-crops`);
+      const saved = await _fetchAndTriggerDownload(url, "crops.zip");
+      updateProcess(
+        pid,
+        saved
+          ? { status: "completed", progress: 100, message: "Download complete" }
+          : { status: "completed", progress: 100, message: "Cancelled" }
       );
-      if (!res.ok) throw new Error(`Server returned ${res.status}`);
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      const cd = res.headers.get("content-disposition") ?? "";
-      const match = cd.match(/filename="([^"]+)"/);
-      a.download = match?.[1] ?? "crops.zip";
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      showErrorToast("Download failed");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showErrorToast(`Download failed: ${msg}`);
+      updateProcess(pid, {
+        status: "error",
+        message: `Download failed: ${msg}`,
+      });
     } finally {
-      setIsDownloading(false);
+      setDownloadingCropsVersion(null);
+    }
+  }
+
+  async function handleBoundaryCropDownload(
+    boundaryVersion: number,
+    orthoVersion: number
+  ) {
+    setDownloadingCropsBv(boundaryVersion);
+    const pid = addProcess({
+      type: "processing",
+      title: "Downloading crops…",
+      status: "running",
+      items: [],
+      progress: 50,
+    });
+    try {
+      const url = apiUrl(
+        `/api/v1/pipeline-runs/${runId}/plot-boundaries/${boundaryVersion}/download-crops?ortho_version=${orthoVersion}`
+      );
+      const saved = await _fetchAndTriggerDownload(url, "crops.zip");
+      updateProcess(
+        pid,
+        saved
+          ? { status: "completed", progress: 100, message: "Download complete" }
+          : { status: "completed", progress: 100, message: "Cancelled" }
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showErrorToast(`Download failed: ${msg}`);
+      updateProcess(pid, {
+        status: "error",
+        message: `Download failed: ${msg}`,
+      });
+    } finally {
+      setDownloadingCropsBv(null);
     }
   }
 
@@ -1182,109 +1964,53 @@ export function RunDetail() {
                   isExecuting={executeMutation.isPending || isRunning}
                   isStopping={stopMutation.isPending}
                   warning={warning}
+                  extraContent={(() => {
+                    if (
+                      step.key === "orthomosaic" &&
+                      pipelineType === "aerial" &&
+                      orthoVersions &&
+                      orthoVersions.length > 0
+                    ) {
+                      return (
+                        <OrthoVersionsPanel
+                          runId={runId}
+                          versions={orthoVersions}
+                          onDelete={(v) => deleteOrthoMutation.mutate(v)}
+                          onRename={(v, name) =>
+                            renameOrthoMutation.mutate({ version: v, name })
+                          }
+                          isDeleting={deleteOrthoMutation.isPending}
+                        />
+                      );
+                    }
+                    if (
+                      step.key === "plot_boundary_prep" &&
+                      pipelineType === "aerial" &&
+                      plotBoundaryVersions &&
+                      plotBoundaryVersions.length > 0
+                    ) {
+                      return (
+                        <PlotBoundaryVersionsPanel
+                          versions={plotBoundaryVersions}
+                          orthoVersions={orthoVersions ?? []}
+                          onRename={(v, name) =>
+                            renamePlotBoundaryMutation.mutate({
+                              version: v,
+                              name,
+                            })
+                          }
+                          downloadingCropsBv={downloadingCropsBv}
+                          onDownloadCrops={handleBoundaryCropDownload}
+                        />
+                      );
+                    }
+                    return undefined;
+                  })()}
                 />
               );
             })}
           </CardContent>
         </Card>
-
-        {/* Orthomosaic Versions (aerial only) */}
-        {pipelineType === "aerial" && run.steps_completed?.orthomosaic && (
-          <Card className="mb-6">
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <Layers className="text-muted-foreground h-4 w-4" />
-                <CardTitle>Orthomosaic Versions</CardTitle>
-              </div>
-              <CardDescription>
-                Each time you re-run orthomosaic generation, a new versioned
-                copy is saved. The active version is used for subsequent steps.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {!orthoVersions || orthoVersions.length === 0 ? (
-                <p className="text-muted-foreground py-4 text-center text-sm">
-                  No versions found.
-                </p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Version</TableHead>
-                      <TableHead>Created</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {[...orthoVersions]
-                      .sort((a, b) => b.version - a.version)
-                      .map((v) => (
-                        <TableRow key={v.version}>
-                          <TableCell className="font-medium">
-                            v{v.version}
-                          </TableCell>
-                          <TableCell className="text-muted-foreground text-sm">
-                            {v.created_at
-                              ? new Date(v.created_at).toLocaleString()
-                              : "—"}
-                          </TableCell>
-                          <TableCell>
-                            {v.active ? (
-                              <Badge className="bg-green-500/10 text-green-700">
-                                Active
-                              </Badge>
-                            ) : (
-                              <Badge
-                                variant="outline"
-                                className="text-muted-foreground"
-                              >
-                                Inactive
-                              </Badge>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              {!v.active && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={
-                                    activateOrthoMutation.isPending ||
-                                    deleteOrthoMutation.isPending
-                                  }
-                                  onClick={() =>
-                                    activateOrthoMutation.mutate(v.version)
-                                  }
-                                >
-                                  <Star className="mr-1 h-3.5 w-3.5" />
-                                  Activate
-                                </Button>
-                              )}
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-red-500 hover:text-red-600"
-                                disabled={
-                                  activateOrthoMutation.isPending ||
-                                  deleteOrthoMutation.isPending
-                                }
-                                onClick={() =>
-                                  deleteOrthoMutation.mutate(v.version)
-                                }
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        )}
 
         {/* Advanced — Output Files (collapsible) */}
         <details className="group">
@@ -1306,10 +2032,10 @@ export function RunDetail() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={handleDownloadCrops}
-                    disabled={isDownloading}
+                    onClick={() => handleDownloadCrops()}
+                    disabled={downloadingCropsVersion !== null}
                   >
-                    {isDownloading ? (
+                    {downloadingCropsVersion !== null ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
                       <Download className="mr-2 h-4 w-4" />
@@ -1325,6 +2051,103 @@ export function RunDetail() {
           </Card>
         </details>
       </div>
+
+      {/* Orthomosaic name prompt dialog */}
+      <Dialog open={showOrthoNameDialog} onOpenChange={setShowOrthoNameDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Name this orthomosaic</DialogTitle>
+            <DialogDescription>
+              Optionally give this run a name so you can identify it later (e.g.
+              "High quality", "First attempt"). You can rename it any time.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <Label htmlFor="ortho-name" className="text-sm">
+              Name (optional)
+            </Label>
+            <Input
+              id="ortho-name"
+              className="mt-1"
+              placeholder={`v${(orthoVersions?.length ?? 0) + 1}`}
+              value={orthoNameInput}
+              onChange={(e) => setOrthoNameInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && startOrthoWithName()}
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowOrthoNameDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button onClick={startOrthoWithName}>Start</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Trait extraction version selection dialog */}
+      <Dialog
+        open={showTraitDialog}
+        onOpenChange={(open) => !open && setShowTraitDialog(false)}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Select Versions for Trait Extraction</DialogTitle>
+            <DialogDescription>
+              Choose which orthomosaic and plot boundary version to use.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {(orthoVersions?.length ?? 0) > 0 && (
+              <div className="space-y-1">
+                <Label className="text-sm">Orthomosaic</Label>
+                <select
+                  className="border-input bg-background w-full rounded border px-3 py-2 text-sm"
+                  value={traitOrthoVersion ?? ""}
+                  onChange={(e) => setTraitOrthoVersion(Number(e.target.value))}
+                >
+                  {orthoVersions!.map((ov) => (
+                    <option key={ov.version} value={ov.version}>
+                      {ov.name
+                        ? `${ov.name} (v${ov.version})`
+                        : `v${ov.version}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {(plotBoundaryVersions?.length ?? 0) > 0 && (
+              <div className="space-y-1">
+                <Label className="text-sm">Plot Boundaries</Label>
+                <select
+                  className="border-input bg-background w-full rounded border px-3 py-2 text-sm"
+                  value={traitBoundaryVersion ?? ""}
+                  onChange={(e) =>
+                    setTraitBoundaryVersion(Number(e.target.value))
+                  }
+                >
+                  {plotBoundaryVersions!.map((bv) => (
+                    <option key={bv.version} value={bv.version}>
+                      {bv.name
+                        ? `${bv.name} (v${bv.version})`
+                        : `v${bv.version}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowTraitDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={startTraitExtraction}>Run Trait Extraction</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Docker missing dialog */}
       <Dialog open={showDockerDialog} onOpenChange={setShowDockerDialog}>

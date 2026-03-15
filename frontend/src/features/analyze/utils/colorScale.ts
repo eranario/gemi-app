@@ -1,38 +1,53 @@
 import { scaleLinear } from "d3-scale"
 
-/** Return 2nd and 98th percentile of an array of numbers. */
-export function percentileRange(values: number[]): [number, number] {
-  if (values.length === 0) return [0, 1]
-  const sorted = [...values].sort((a, b) => a - b)
-  const lo = sorted[Math.floor(sorted.length * 0.02)]
-  const hi = sorted[Math.ceil(sorted.length * 0.98) - 1]
-  return lo === hi ? [lo - 1, hi + 1] : [lo, hi]
-}
-
-/** True if the column name suggests temperature (reverse the color ramp). */
-export function isTempColumn(col: string): boolean {
-  return /temp|celsius|fahrenheit/i.test(col)
-}
+// Viridis — perceptually uniform, colorblind-friendly
+const RAMP_STOPS = ["#440154", "#3b528b", "#21918c", "#5ec962", "#fde725"] as const
 
 /**
- * Build a d3 scale that maps a numeric value → [r, g, b, a] uint8 array.
- * Red → Blue by default; Blue → Red for temperature columns.
+ * Build a color function using quantile normalization.
+ *
+ * Each value is mapped to its rank within the dataset (0–1) and that rank
+ * is mapped through viridis. This ensures the full palette always spreads
+ * evenly across all plots, regardless of skew or outliers.
+ *
+ * Returns: colorFn, and the actual min/max for the legend labels.
  */
 export function buildColorScale(
-  min: number,
-  max: number,
-  column: string,
-): (value: number | null | undefined) => [number, number, number, number] {
-  const reverse = isTempColumn(column)
+  values: number[],
+  _column: string,
+): {
+  colorFn: (value: number | null | undefined) => [number, number, number, number]
+  min: number
+  max: number
+} {
+  const sorted = [...values].sort((a, b) => a - b)
+  const n = sorted.length
 
-  const ramp = reverse
-    ? scaleLinear<string>().domain([min, max]).range(["#2563eb", "#dc2626"]).clamp(true)
-    : scaleLinear<string>().domain([min, max]).range(["#dc2626", "#2563eb"]).clamp(true)
+  const ramp = scaleLinear<string>()
+    .domain([0, 0.25, 0.5, 0.75, 1])
+    .range([...RAMP_STOPS])
+    .clamp(true)
 
-  return (value) => {
-    if (value == null || isNaN(value as number)) return [128, 128, 128, 180]
-    const hex = ramp(value as number)
-    return hexToRgba(hex, 200)
+  function quantileRank(v: number): number {
+    if (n === 0) return 0.5
+    // Binary search for lower bound
+    let lo = 0
+    let hi = n
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (sorted[mid] < v) lo = mid + 1
+      else hi = mid
+    }
+    return lo / (n > 1 ? n - 1 : 1)
+  }
+
+  return {
+    colorFn: (value) => {
+      if (value == null || isNaN(value as number)) return [128, 128, 128, 80]
+      return hexToRgba(ramp(quantileRank(value as number)), 210)
+    },
+    min: sorted[0] ?? 0,
+    max: sorted[n - 1] ?? 1,
   }
 }
 
@@ -44,9 +59,7 @@ function hexToRgba(hex: string, alpha: number): [number, number, number, number]
   return [r, g, b, alpha]
 }
 
-/** CSS gradient string for the legend (left = low, right = high). */
-export function legendGradient(column: string): string {
-  return isTempColumn(column)
-    ? "linear-gradient(to right, #2563eb, #dc2626)"
-    : "linear-gradient(to right, #dc2626, #2563eb)"
+/** CSS gradient string for the legend. */
+export function legendGradient(_column: string): string {
+  return `linear-gradient(to right, ${RAMP_STOPS.join(", ")})`
 }

@@ -66,6 +66,7 @@ interface InferenceToolProps {
   isStopping: boolean
   onRunInference: (config: InferenceRunConfig) => void
   onCancel: () => void
+  initialModels?: ModelConfig[]
 }
 
 // ── Class colours ─────────────────────────────────────────────────────────────
@@ -212,13 +213,17 @@ function ModelEditor({
   isRunning,
   isStopping,
   inferenceComplete,
+  initialModels,
 }: {
   onRun: (cfg: InferenceRunConfig) => void
   isRunning: boolean
   isStopping: boolean
   inferenceComplete: boolean
+  initialModels?: ModelConfig[]
 }) {
-  const [models, setModels] = useState<ModelConfig[]>([EMPTY_MODEL()])
+  const [models, setModels] = useState<ModelConfig[]>(() =>
+    initialModels && initialModels.length > 0 ? initialModels : [EMPTY_MODEL()]
+  )
 
   function update(idx: number, field: keyof ModelConfig, value: string) {
     setModels((prev) => prev.map((m, i) => i === idx ? { ...m, [field]: value } : m))
@@ -319,6 +324,7 @@ export function InferenceTool({
   isStopping,
   onRunInference,
   onCancel,
+  initialModels,
 }: InferenceToolProps) {
   const [imageIdx, setImageIdx] = useState(0)
   const [activeModel, setActiveModel] = useState<string | undefined>(undefined)
@@ -351,6 +357,7 @@ export function InferenceTool({
         isRunning={isRunning}
         isStopping={isStopping}
         inferenceComplete={inferenceComplete}
+        initialModels={initialModels}
       />
 
       {/* Results */}

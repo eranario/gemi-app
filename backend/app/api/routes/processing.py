@@ -108,6 +108,11 @@ class ExecuteStepRequest(BaseModel):
     models: list[ModelConfig] = []
     # Stitching version override (optional)
     agrowstitch_version: int = 1
+    # Orthomosaic run name (aerial only, optional)
+    ortho_name: str | None = None
+    # Trait extraction version overrides (aerial only, optional)
+    ortho_version: int | None = None
+    boundary_version: int | None = None
 
 
 @router.post("/pipeline-runs/{id}/execute-step")
@@ -168,9 +173,16 @@ def execute_step(
                     "pc_quality": (pipeline.config or {}).get("pc_quality", "medium"),
                     "feature_quality": (pipeline.config or {}).get("feature_quality", "high"),
                     "custom_odm_options": (pipeline.config or {}).get("custom_odm_options", ""),
+                    "name": body.ortho_name,
                 },
             ),
-            "trait_extraction": (aerial.run_trait_extraction, {}),
+            "trait_extraction": (
+                aerial.run_trait_extraction,
+                {
+                    "ortho_version": body.ortho_version,
+                    "boundary_version": body.boundary_version,
+                },
+            ),
             "inference": (
                 aerial.run_inference,
                 {
@@ -461,6 +473,9 @@ class SavePlotGridRequest(BaseModel):
     pop_boundary: dict[str, Any]   # GeoJSON Feature (for saving Pop-Boundary file)
     grid_options: dict[str, Any] | None = None   # GridOptions (width, length, rows, …)
     grid_offset: dict[str, Any] | None = None    # { lon, lat } drag offset
+    ortho_version: int | None = None  # which ortho version was used as the background
+    save_as: bool = False     # True → always create new version; False → overwrite active or create v1
+    name: str | None = None   # optional name for the new version (only used when save_as=True)
 
 
 @router.post("/pipeline-runs/{id}/save-plot-grid")
@@ -472,6 +487,8 @@ def save_plot_grid(
     body: SavePlotGridRequest,
 ) -> dict[str, Any]:
     """Save a pre-computed plot grid GeoJSON from the frontend (bypasses backend computation)."""
+    from datetime import datetime as _dt
+
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
     paths.intermediate_pipeline.mkdir(parents=True, exist_ok=True)
@@ -485,10 +502,43 @@ def save_plot_grid(
             "options": body.grid_options,
             "offset": body.grid_offset or {"lon": 0, "lat": 0},
         }
-    paths.plot_boundary_geojson.write_text(json.dumps(geojson_to_save, indent=2))
 
     existing_outputs = dict(run.outputs or {})
+    versions = [dict(v) for v in existing_outputs.get("plot_boundaries", [])]
+    now = _dt.utcnow().isoformat()
+
+    if body.save_as or not versions:
+        # Create new version
+        new_version = max((v["version"] for v in versions), default=0) + 1
+        versioned_path = paths.plot_boundary_geojson_versioned(new_version)
+        versioned_path.write_text(json.dumps(geojson_to_save, indent=2))
+        entry = {
+            "version": new_version,
+            "name": body.name.strip() if body.name else None,
+            "geojson_path": paths.rel(versioned_path),
+            "ortho_version": body.ortho_version,
+            "created_at": now,
+        }
+        versions.append(entry)
+        existing_outputs["active_plot_boundary_version"] = new_version
+    else:
+        # Overwrite the current active version
+        active_v = existing_outputs.get("active_plot_boundary_version")
+        target = next((v for v in versions if v["version"] == active_v), versions[-1] if versions else None)
+        if target:
+            versioned_path = paths.abs(target["geojson_path"])
+            versioned_path.write_text(json.dumps(geojson_to_save, indent=2))
+            target["ortho_version"] = body.ortho_version
+
+    # Always write canonical file for backward compat (trait extraction uses it)
+    paths.plot_boundary_geojson.write_text(json.dumps(geojson_to_save, indent=2))
+
+    existing_outputs["plot_boundaries"] = versions
     existing_outputs["plot_boundary_prep"] = paths.rel(paths.plot_boundary_geojson)
+    if body.ortho_version is not None:
+        existing_outputs["plot_boundary_ortho_version"] = body.ortho_version
+        # Also set as active so downstream steps (trait extraction) use the same ortho
+        existing_outputs["active_ortho_version"] = body.ortho_version
     existing_steps = dict(run.steps_completed or {})
     existing_steps["plot_boundary_prep"] = True
 
@@ -498,7 +548,7 @@ def save_plot_grid(
         run_in=PipelineRunUpdate(steps_completed=existing_steps, outputs=existing_outputs),
     )
 
-    return {"status": "saved", "feature_count": len(body.geojson.get("features", []))}
+    return {"status": "saved" if not body.save_as else "saved_as", "feature_count": len(body.geojson.get("features", []))}
 
 
 @router.post("/pipeline-runs/{id}/generate-plot-grid")
@@ -1213,6 +1263,10 @@ def orthomosaic_info(
             except Exception:
                 pass
 
+        _outputs = run.outputs or {}
+        _versions = _get_ortho_versions(_outputs)
+        _active_v = _outputs.get("active_ortho_version")
+
         return {
             "available": True,
             "path": str(tif),
@@ -1220,6 +1274,12 @@ def orthomosaic_info(
             "existing_geojson": existing_geojson,
             "existing_pop_boundary": existing_pop,
             "existing_grid_settings": existing_grid_settings,
+            "active_ortho_version": _active_v,
+            "plot_boundary_ortho_version": _outputs.get("plot_boundary_ortho_version"),
+            "ortho_versions": [
+                {"version": v["version"], "name": v.get("name")}
+                for v in sorted(_versions, key=lambda x: x["version"])
+            ],
         }
 
 
@@ -1315,6 +1375,10 @@ def _get_ortho_versions(outputs: dict) -> list[dict]:
     return versions
 
 
+def _get_plot_boundary_versions(outputs: dict) -> list[dict]:
+    return list(outputs.get("plot_boundaries", []))
+
+
 @router.get("/pipeline-runs/{id}/orthomosaics")
 def list_orthomosaics(
     session: SessionDep,
@@ -1325,7 +1389,83 @@ def list_orthomosaics(
     outputs = run.outputs or {}
     versions = _get_ortho_versions(outputs)
     active = outputs.get("active_ortho_version")
-    return [{"active": v["version"] == active, **v} for v in sorted(versions, key=lambda x: x["version"])]
+    result = []
+    for v in sorted(versions, key=lambda x: x["version"]):
+        ver = v["version"]
+        # has_crops: versioned key wins, then fall back to the general key for the active version
+        has_crops = (
+            f"cropped_images_v{ver}" in outputs
+            or (ver == active and "cropped_images" in outputs)
+        )
+        result.append({"active": ver == active, "has_crops": has_crops, **v})
+    return result
+
+
+@router.get("/pipeline-runs/{id}/orthomosaics/{version}/preview")
+def orthomosaic_version_preview(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    version: int,
+    max_size: int = 2000,
+):
+    """
+    Return a specific orthomosaic version as a downscaled JPEG.
+    max_size controls the longest-side resolution (default 2000 for low-res, pass 8000 for high-res).
+    """
+    import io
+    import numpy as np
+    import rasterio
+    from rasterio.transform import from_bounds
+    from rasterio.enums import Resampling
+    from fastapi.responses import Response
+
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+    versions = _get_ortho_versions(run.outputs or {})
+    target = next((v for v in versions if v["version"] == version), None)
+    if not target:
+        raise HTTPException(404, f"Orthomosaic version {version} not found")
+
+    # Prefer pyramid → rgb
+    tif_rel = target.get("pyramid") or target.get("rgb")
+    if not tif_rel:
+        raise HTTPException(404, "No TIF file for this version")
+    tif = paths.abs(tif_rel)
+    if not tif.exists():
+        raise HTTPException(404, "TIF file not found on disk")
+
+    try:
+        with rasterio.open(tif) as src:
+            scale = min(max_size / src.width, max_size / src.height, 1.0)
+            out_w = max(1, int(src.width * scale))
+            out_h = max(1, int(src.height * scale))
+            n_bands = min(src.count, 3)
+            data = src.read(
+                list(range(1, n_bands + 1)),
+                out_shape=(n_bands, out_h, out_w),
+                resampling=Resampling.average,
+            )
+
+        img = np.transpose(data, (1, 2, 0))
+        if img.dtype != np.uint8:
+            mn, mx = img.min(), img.max()
+            if mx > mn:
+                img = ((img - mn) / (mx - mn) * 255).astype(np.uint8)
+            else:
+                img = np.zeros_like(img, dtype=np.uint8)
+        if img.shape[2] == 1:
+            img = np.repeat(img, 3, axis=2)
+
+        from PIL import Image
+        buf = io.BytesIO()
+        Image.fromarray(img, mode="RGB").save(buf, format="JPEG", quality=88)
+        buf.seek(0)
+        return Response(content=buf.read(), media_type="image/jpeg")
+
+    except Exception as exc:
+        logger.exception("orthomosaic_version_preview failed: %s", exc)
+        raise HTTPException(500, f"Failed to generate preview: {exc}")
 
 
 @router.delete("/pipeline-runs/{id}/orthomosaics/{version}", status_code=200)
@@ -1391,6 +1531,135 @@ def activate_orthomosaic(
         run_in=PipelineRunUpdate(outputs=existing_outputs),
     )
     return {"active_ortho_version": version}
+
+
+class RenameOrthoRequest(BaseModel):
+    name: str
+
+
+@router.patch("/pipeline-runs/{id}/orthomosaics/{version}/rename")
+def rename_orthomosaic(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    version: int,
+    body: RenameOrthoRequest,
+) -> dict:
+    run = _get_run_or_404(session, id)
+    existing_outputs = dict(run.outputs or {})
+    # Deep-copy each version dict so SQLAlchemy sees a genuinely new object
+    versions = [dict(v) for v in _get_ortho_versions(existing_outputs)]
+    target = next((v for v in versions if v["version"] == version), None)
+    if not target:
+        raise HTTPException(404, f"Orthomosaic version {version} not found")
+    target["name"] = body.name.strip() or None
+    existing_outputs["orthomosaics"] = versions
+    existing_outputs.pop("orthomosaic", None)
+    update_pipeline_run(
+        session=session,
+        db_run=run,
+        run_in=PipelineRunUpdate(outputs=existing_outputs),
+    )
+    return {"version": version, "name": target["name"]}
+
+
+# ── Plot boundary versions ─────────────────────────────────────────────────────────
+
+@router.get("/pipeline-runs/{id}/plot-boundaries")
+def list_plot_boundaries(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> list[dict]:
+    run = _get_run_or_404(session, id)
+    outputs = run.outputs or {}
+    versions = _get_plot_boundary_versions(outputs)
+    active_v = outputs.get("active_plot_boundary_version")
+    return [{"active": v["version"] == active_v, **v} for v in sorted(versions, key=lambda x: x["version"])]
+
+
+class RenamePlotBoundaryRequest(BaseModel):
+    name: str
+
+
+@router.patch("/pipeline-runs/{id}/plot-boundaries/{version}/rename")
+def rename_plot_boundary(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    version: int,
+    body: RenamePlotBoundaryRequest,
+) -> dict:
+    run = _get_run_or_404(session, id)
+    existing_outputs = dict(run.outputs or {})
+    versions = [dict(v) for v in _get_plot_boundary_versions(existing_outputs)]
+    target = next((v for v in versions if v["version"] == version), None)
+    if not target:
+        raise HTTPException(404, f"Plot boundary version {version} not found")
+    target["name"] = body.name.strip() or None
+    existing_outputs["plot_boundaries"] = versions
+    update_pipeline_run(
+        session=session,
+        db_run=run,
+        run_in=PipelineRunUpdate(outputs=existing_outputs),
+    )
+    return {"version": version, "name": target["name"]}
+
+
+@router.post("/pipeline-runs/{id}/plot-boundaries/{boundary_version}/download-crops")
+def download_crops_for_boundary(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    boundary_version: int,
+    ortho_version: int,
+) -> StreamingResponse:
+    """Crop the specified ortho version using the specified boundary version and return as ZIP."""
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+    outputs = run.outputs or {}
+
+    # Resolve boundary geojson
+    versions = _get_plot_boundary_versions(outputs)
+    bv = next((v for v in versions if v["version"] == boundary_version), None)
+    if not bv:
+        raise HTTPException(404, f"Plot boundary version {boundary_version} not found")
+    boundary_path = paths.abs(bv["geojson_path"])
+    if not boundary_path.exists():
+        raise HTTPException(404, "Boundary GeoJSON file not found on disk")
+
+    # Resolve ortho RGB tif
+    ortho_list = _get_ortho_versions(outputs)
+    ov = next((o for o in ortho_list if o["version"] == ortho_version), None)
+    if not ov:
+        raise HTTPException(404, f"Orthomosaic version {ortho_version} not found")
+    # Prefer pyramid, fall back to rgb
+    rgb_rel = ov.get("pyramid") or ov.get("rgb")
+    if not rgb_rel:
+        raise HTTPException(404, "No RGB file in orthomosaic version")
+    ortho_path = paths.abs(rgb_rel)
+    if not ortho_path.exists():
+        raise HTTPException(404, "Orthomosaic file not found on disk")
+
+    from app.processing.aerial import crop_plots_to_stream
+
+    images = crop_plots_to_stream(ortho_path=ortho_path, boundary_path=boundary_path)
+    if not images:
+        raise HTTPException(404, "No plots could be cropped from the given boundary and ortho")
+
+    filename = f"crops_{run.date}_{run.population}_b{boundary_version}_o{ortho_version}.zip"
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for img_name, img_bytes in images:
+            zf.writestr(img_name, img_bytes)
+    buf.seek(0)
+
+    return StreamingResponse(
+        iter([buf.read()]),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ── Aerial: use uploaded orthomosaic (skip ODM step) ─────────────────────────
@@ -1578,6 +1847,7 @@ def download_crops(
     session: SessionDep,
     current_user: CurrentUser,
     id: uuid.UUID,
+    ortho_version: int | None = None,
 ) -> StreamingResponse:
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
@@ -1585,6 +1855,12 @@ def download_crops(
 
     # Ground uses AgRowStitch output dir; aerial uses cropped_images/
     if pipeline and pipeline.type == "aerial":
+        outputs = run.outputs or {}
+        if ortho_version is not None:
+            # Verify this version actually has crops recorded
+            versioned_key = f"cropped_images_v{ortho_version}"
+            if versioned_key not in outputs and "cropped_images" not in outputs:
+                raise HTTPException(status_code=404, detail="No crop images found for this orthomosaic version")
         crop_dir = paths.cropped_images_dir
     else:
         version = int((run.outputs or {}).get("stitching_version", 1))
@@ -1598,19 +1874,16 @@ def download_crops(
     if not images:
         raise HTTPException(status_code=404, detail="No image files found in crop directory")
 
-    def zip_stream() -> Any:
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            for img in images:
-                zf.write(img, img.name)
-                buf.seek(0)
-                yield buf.read()
-                buf.seek(0)
-                buf.truncate()
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for img in images:
+            zf.write(img, img.name)
+    buf.seek(0)
 
-    filename = f"crops_{run.date}_{run.population}.zip"
+    version_suffix = f"_v{ortho_version}" if ortho_version is not None else ""
+    filename = f"crops_{run.date}_{run.population}{version_suffix}.zip"
     return StreamingResponse(
-        zip_stream(),
+        iter([buf.read()]),
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

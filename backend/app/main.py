@@ -29,7 +29,7 @@ def _reset_stuck_runs(session: Session) -> int:
     the user can re-run them.
     """
     from sqlmodel import select
-    from app.models.pipeline import PipelineRun
+    from app.models.pipeline import PipelineRun, TraitRecord  # noqa: F401 — ensures table is created
 
     stuck = session.exec(
         select(PipelineRun).where(PipelineRun.status == "running")

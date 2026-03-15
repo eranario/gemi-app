@@ -126,3 +126,33 @@ class PipelineRunPublic(PipelineRunBase):
 class PipelineRunsPublic(SQLModel):
     data: list[PipelineRunPublic]
     count: int
+
+
+# ---------------------------------------------------------------------------
+# TraitRecord — provenance for each trait extraction run.
+# Tracks which ortho version + boundary version produced a given traits file.
+# ---------------------------------------------------------------------------
+
+class TraitRecord(SQLModel, table=True):
+    __tablename__ = "traitrecord"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    run_id: uuid.UUID = Field(
+        foreign_key="pipelinerun.id", nullable=False, ondelete="CASCADE"
+    )
+    # Relative path to the GeoJSON file (via RunPaths.rel())
+    geojson_path: str = Field(max_length=1000)
+    # Ortho version used (aerial only)
+    ortho_version: int | None = Field(default=None)
+    ortho_name: str | None = Field(default=None, max_length=255)
+    # Boundary version used (None = canonical Plot-Boundary-WGS84.geojson)
+    boundary_version: int | None = Field(default=None)
+    boundary_name: str | None = Field(default=None, max_length=255)
+    # Summary stats computed at extraction time
+    plot_count: int = Field(default=0)
+    trait_columns: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    vf_avg: float | None = Field(default=None)
+    height_avg: float | None = Field(default=None)
+    created_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )

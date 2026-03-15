@@ -160,6 +160,7 @@ def run_orthomosaic(
     pc_quality: str = "medium",
     feature_quality: str = "high",
     custom_odm_options: str = "",
+    name: str | None = None,
 ) -> dict[str, Any]:
     """
     Run OpenDroneMap via Docker to produce orthomosaic + DEM.
@@ -402,6 +403,7 @@ def run_orthomosaic(
     from datetime import datetime as _dt, timezone as _tz
     new_entry = {
         "version": next_version,
+        "name": name,
         "rgb": paths.rel(rgb_dest),
         "dem": paths.rel(dem_dest) if dem_ok else None,
         "pyramid": paths.rel(pyramid_dest) if pyramid_ok else None,
@@ -502,6 +504,8 @@ def run_trait_extraction(
     run_id: uuid.UUID,
     stop_event: threading.Event,
     emit: Callable[[dict], None],
+    ortho_version: int | None = None,
+    boundary_version: int | None = None,
 ) -> dict[str, Any]:
     """
     Extract vegetation fraction, height, and temperature per plot.
@@ -528,14 +532,14 @@ def run_trait_extraction(
     _run = session.get(_PipelineRun, run_id)
     paths = _get_paths(session, run_id)
 
-    # Resolve active orthomosaic path from versioned outputs
+    # Resolve orthomosaic path — use specified version or fall back to active
     _outputs = (_run.outputs or {}) if _run else {}
-    _active_v = _outputs.get("active_ortho_version")
     _orthos = _outputs.get("orthomosaics", [])
-    _active = next((o for o in _orthos if o["version"] == _active_v), None)
-    if _active:
-        aerial_rgb = paths.abs(_active["rgb"])
-        aerial_dem = paths.abs(_active["dem"]) if _active.get("dem") else None
+    _resolve_v = ortho_version if ortho_version is not None else _outputs.get("active_ortho_version")
+    _ortho = next((o for o in _orthos if o["version"] == _resolve_v), None)
+    if _ortho:
+        aerial_rgb = paths.abs(_ortho["rgb"])
+        aerial_dem = paths.abs(_ortho["dem"]) if _ortho.get("dem") else None
     else:
         # Backward-compat: old flat "orthomosaic" key
         _legacy = _outputs.get("orthomosaic")
@@ -544,22 +548,31 @@ def run_trait_extraction(
 
     if not aerial_rgb.exists():
         raise FileNotFoundError(
-            f"Active orthomosaic not found at {aerial_rgb}. "
-            "Complete the Orthomosaic step or activate a version first."
+            f"Orthomosaic not found at {aerial_rgb}. "
+            "Complete the Orthomosaic step or select a valid version."
         )
-    if not paths.plot_boundary_geojson.exists():
+
+    # Resolve plot boundary GeoJSON — use specified version or fall back to canonical
+    _boundary_path = paths.plot_boundary_geojson  # default canonical
+    if boundary_version is not None:
+        _boundaries = _outputs.get("plot_boundaries", [])
+        _bv = next((b for b in _boundaries if b["version"] == boundary_version), None)
+        if _bv:
+            _boundary_path = paths.abs(_bv["geojson_path"])
+
+    if not _boundary_path.exists():
         raise FileNotFoundError(
-            f"Plot boundaries not found at {paths.plot_boundary_geojson}. "
+            f"Plot boundaries not found at {_boundary_path}. "
             "Complete the Plot Boundaries step first."
         )
 
     paths.cropped_images_dir.mkdir(parents=True, exist_ok=True)
 
     # Load boundary GeoJSON
-    gdf = gpd.read_file(paths.plot_boundary_geojson)
+    gdf = gpd.read_file(_boundary_path)
     n_plots = len(gdf)
     emit({"event": "progress", "message": f"Extracting traits for {n_plots} plots…",
-          "total": n_plots})
+          "total": n_plots, "progress": 0})
 
     has_dem = aerial_dem is not None and aerial_dem.exists()
     records: list[dict] = []
@@ -649,7 +662,9 @@ def run_trait_extraction(
 
                 records.append(record)
 
+                pct = round((i + 1) / n_plots * 100)
                 emit({"event": "progress", "index": i, "total": n_plots,
+                      "progress": pct,
                       "message": f"Plot {plot_id}: VF={vf:.3f}"
                                  + (f", H={height_m:.3f}m" if height_m is not None else "")})
 
@@ -671,10 +686,107 @@ def run_trait_extraction(
     gdf_out.to_file(str(paths.traits_geojson), driver="GeoJSON")
     logger.info("Wrote Traits-WGS84.geojson (%d plots)", len(records))
 
-    return {
+    # ── Compute summary stats ─────────────────────────────────────────────
+    vf_values = [r["Vegetation_Fraction"] for r in records if "Vegetation_Fraction" in r]
+    vf_avg = round(float(np.mean(vf_values)), 4) if vf_values else None
+    h_values = [r["Height_95p_meters"] for r in records if "Height_95p_meters" in r]
+    height_avg = round(float(np.mean(h_values)), 4) if h_values else None
+    trait_cols = [c for c in df_traits.columns if c not in ("plot_id",)]
+
+    # Resolve boundary version + name used
+    _resolved_boundary_v: int | None = None
+    _resolved_boundary_name: str | None = None
+    if boundary_version is not None:
+        _boundaries_list = (_run.outputs or {}).get("plot_boundaries", []) if _run else []
+        _matched_bv = next((b for b in _boundaries_list if b["version"] == boundary_version), None)
+        if _matched_bv:
+            _resolved_boundary_v = boundary_version
+            _resolved_boundary_name = _matched_bv.get("name")
+
+    # Resolve ortho version + name used
+    _resolved_ortho_v = ortho_version if ortho_version is not None else _resolve_v
+    _resolved_ortho_name = _ortho.get("name") if _ortho else None
+
+    # ── Create provenance record ──────────────────────────────────────────
+    from app.models.pipeline import TraitRecord as _TraitRecord
+    _trait_record = _TraitRecord(
+        run_id=run_id,
+        geojson_path=paths.rel(paths.traits_geojson),
+        ortho_version=_resolved_ortho_v,
+        ortho_name=_resolved_ortho_name,
+        boundary_version=_resolved_boundary_v,
+        boundary_name=_resolved_boundary_name,
+        plot_count=len(records),
+        trait_columns=list(trait_cols),
+        vf_avg=vf_avg,
+        height_avg=height_avg,
+    )
+    session.add(_trait_record)
+    session.commit()
+    logger.info("Created TraitRecord %s (%d plots, ortho v%s)", _trait_record.id, len(records), _resolved_ortho_v)
+
+    result: dict[str, Any] = {
         "traits": paths.rel(paths.traits_geojson),
         "cropped_images": paths.rel(paths.cropped_images_dir),
     }
+    # Also key crops by the ortho version used so the UI can link them
+    active_v = (_run.outputs or {}).get("active_ortho_version") if _run else None
+    if active_v is not None:
+        result[f"cropped_images_v{active_v}"] = paths.rel(paths.cropped_images_dir)
+    return result
+
+
+# ── On-demand plot cropping ────────────────────────────────────────────────────
+
+def crop_plots_to_stream(
+    *,
+    ortho_path: Path,
+    boundary_path: Path,
+) -> list[tuple[str, bytes]]:
+    """
+    Crop the orthomosaic by each plot polygon in the boundary GeoJSON.
+    Returns a list of (filename, image_bytes) tuples for ZIP streaming.
+    Does not write any files to disk.
+    """
+    import cv2
+    import geopandas as gpd
+    import rasterio
+    from rasterio.windows import from_bounds as _from_bounds
+
+    gdf = gpd.read_file(boundary_path)
+    results: list[tuple[str, bytes]] = []
+
+    with rasterio.open(ortho_path) as rgb_src:
+        if gdf.crs is None:
+            gdf = gdf.set_crs("EPSG:4326")
+        if gdf.crs != rgb_src.crs:
+            gdf = gdf.to_crs(rgb_src.crs)
+
+        for i, (_, row) in enumerate(gdf.iterrows()):
+            geom = row.geometry
+            if geom is None or geom.is_empty:
+                continue
+            bounds = geom.bounds
+            window = _from_bounds(*bounds, rgb_src.transform)
+            rgb_data = rgb_src.read([1, 2, 3], window=window, boundless=True, fill_value=0)
+            rgb_arr = np.transpose(rgb_data, (1, 2, 0))
+            if rgb_arr.size == 0 or rgb_arr.shape[0] == 0 or rgb_arr.shape[1] == 0:
+                continue
+
+            # Derive plot ID from properties
+            orig_row = gdf.iloc[i]
+            plot_id = (
+                _prop(orig_row, "Plot", "plot", "plot_id")
+                or _prop(orig_row, "id", "ID")
+                or str(i)
+            )
+
+            bgr = cv2.cvtColor(rgb_arr, cv2.COLOR_RGB2BGR)
+            ok, buf = cv2.imencode(".png", bgr)
+            if ok:
+                results.append((f"plot_{plot_id}.png", buf.tobytes()))
+
+    return results
 
 
 # ── Step 5: Inference (Roboflow) ─────────────────────────────────────────────
