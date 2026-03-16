@@ -1,5 +1,5 @@
-import { useState } from "react"
-import { ChevronDown, ChevronUp, ExternalLink, X } from "lucide-react"
+import { useEffect, useState } from "react"
+import { ChevronDown, ChevronUp, ExternalLink, X, Ban } from "lucide-react"
 import { useNavigate } from "@tanstack/react-router"
 import { useProcess } from "@/contexts/ProcessContext"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
@@ -35,9 +35,11 @@ function processStatusLabel(process: Process): string {
 function ProcessItem({
   process,
   onDismiss,
+  onCancel,
 }: {
   process: Process
   onDismiss: () => void
+  onCancel: () => void
 }) {
   const navigate = useNavigate()
   const pct = processProgress(process)
@@ -66,6 +68,15 @@ function ProcessItem({
           </button>
         )}
         <span className={`shrink-0 text-xs ${statusColor}`}>{statusLabel}</span>
+        {process.cancel && !isDone && (
+          <button
+            className="shrink-0 text-muted-foreground hover:text-destructive"
+            title="Cancel"
+            onClick={onCancel}
+          >
+            <Ban className="h-3.5 w-3.5" />
+          </button>
+        )}
         <button
           className={`shrink-0 text-muted-foreground hover:text-foreground ${isDone ? "" : "invisible pointer-events-none"}`}
           title="Dismiss"
@@ -92,8 +103,12 @@ function ProcessItem({
 }
 
 export function ProcessPanel() {
-  const { processes, hasBeenActive, removeProcess, clearCompleted } = useProcess()
+  const { processes, hasBeenActive, removeProcess, clearCompleted, updateProcess } = useProcess()
   const [isOpen, setIsOpen] = useState(true)
+
+  useEffect(() => {
+    if (processes.length > 0) setIsOpen(true)
+  }, [processes.length])
 
   if (!hasBeenActive || processes.length === 0) return null
 
@@ -151,6 +166,10 @@ export function ProcessPanel() {
               key={p.id}
               process={p}
               onDismiss={() => removeProcess(p.id)}
+              onCancel={() => {
+                p.cancel?.()
+                updateProcess(p.id, { cancel: undefined })
+              }}
             />
           ))}
         </CardContent>

@@ -62,6 +62,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import useCustomToast from "@/hooks/useCustomToast";
 import { useProcess } from "@/contexts/ProcessContext";
+import { analyzeApi, versionLabel, type TraitRecord } from "@/features/analyze/api";
 
 // Resolve a relative /api path to an absolute URL using the backend base
 // injected by the Tauri sidecar, or fall back to a same-origin relative path.
@@ -101,6 +102,13 @@ interface StepDef {
 }
 
 const GROUND_STEPS: StepDef[] = [
+  {
+    key: "plot_marking",
+    label: "Plot Marking",
+    description:
+      "Navigate through raw images and mark the start and end frame for each plot row",
+    kind: "interactive",
+  },
   {
     key: "stitching",
     label: "Stitching",
@@ -396,6 +404,271 @@ interface StepRowProps {
   isStopping: boolean;
   warning?: string;
   extraContent?: React.ReactNode;
+}
+
+// ── Shared confirm-delete dialog ──────────────────────────────────────────────
+
+function ConfirmDeleteDialog({
+  open,
+  title,
+  description,
+  onConfirm,
+  onCancel,
+  isDeleting,
+}: {
+  open: boolean;
+  title: string;
+  description: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  isDeleting?: boolean;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel} disabled={isDeleting}>
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={onConfirm} disabled={isDeleting}>
+            {isDeleting ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="mr-1.5 h-4 w-4" />
+            )}
+            Delete
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Trait records panel (shown under Initial Trait Extraction) ────────────────
+
+function TraitRecordsPanel({
+  runId,
+  onDelete,
+  isDeleting,
+}: {
+  runId: string;
+  onDelete: (id: string) => void;
+  isDeleting: boolean;
+}) {
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+
+  const { data: records = [], isLoading } = useQuery({
+    queryKey: ["trait-records-run", runId],
+    queryFn: () => analyzeApi.listTraitRecordsByRun(runId),
+    staleTime: 30_000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Loading trait records…
+      </div>
+    );
+  }
+
+  if (records.length === 0) return null;
+
+  const confirmRecord = records.find((r: TraitRecord) => r.id === confirmId);
+
+  return (
+    <>
+      <div className="mt-3 rounded-md border overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow className="text-xs">
+              <TableHead className="py-2 text-xs">Ortho</TableHead>
+              <TableHead className="py-2 text-xs">Boundary</TableHead>
+              <TableHead className="py-2 text-xs text-right">Plots</TableHead>
+              <TableHead className="py-2 text-xs text-right">VF avg</TableHead>
+              <TableHead className="py-2 text-xs text-right">Height avg</TableHead>
+              <TableHead className="py-2 text-xs text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {records.map((r: TraitRecord) => (
+              <TableRow key={r.id} className="text-xs">
+                <TableCell className="py-1.5 font-mono">
+                  {versionLabel(r.ortho_version, r.ortho_name)}
+                </TableCell>
+                <TableCell className="py-1.5 font-mono">
+                  {r.boundary_version != null
+                    ? versionLabel(r.boundary_version, r.boundary_name)
+                    : "canonical"}
+                </TableCell>
+                <TableCell className="py-1.5 text-right font-mono">{r.plot_count}</TableCell>
+                <TableCell className="py-1.5 text-right font-mono">
+                  {r.vf_avg != null ? r.vf_avg.toFixed(3) : "—"}
+                </TableCell>
+                <TableCell className="py-1.5 text-right font-mono">
+                  {r.height_avg != null ? `${r.height_avg.toFixed(2)} m` : "—"}
+                </TableCell>
+                <TableCell className="py-1.5 text-right">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 text-red-500 hover:text-red-600"
+                    disabled={isDeleting}
+                    onClick={() => setConfirmId(r.id)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+
+      <ConfirmDeleteDialog
+        open={confirmId !== null}
+        title="Delete trait record?"
+        description={
+          confirmRecord
+            ? `This will permanently delete the traits GeoJSON for Ortho ${versionLabel(confirmRecord.ortho_version, confirmRecord.ortho_name)} / Boundary ${versionLabel(confirmRecord.boundary_version, confirmRecord.boundary_name)} (${confirmRecord.plot_count} plots). This cannot be undone.`
+            : "This will permanently delete the trait record. This cannot be undone."
+        }
+        isDeleting={isDeleting}
+        onConfirm={() => {
+          if (confirmId) onDelete(confirmId);
+          setConfirmId(null);
+        }}
+        onCancel={() => setConfirmId(null)}
+      />
+    </>
+  );
+}
+
+// ── Ground inference results panel ────────────────────────────────────────────
+
+interface InferenceResult {
+  label: string;
+  csv_rel_path: string;
+  plot_count: number;
+  total_predictions: number;
+  classes: Record<string, number>;
+}
+
+function GroundInferencePanel({
+  runId,
+  onDelete,
+  isDeleting,
+}: {
+  runId: string;
+  onDelete: (label: string) => void;
+  isDeleting: boolean;
+}) {
+  const [confirmLabel, setConfirmLabel] = useState<string | null>(null);
+
+  const { data: results = [], isLoading } = useQuery<InferenceResult[]>({
+    queryKey: ["inference-results", runId],
+    queryFn: async () => {
+      const res = await fetch(
+        apiUrl(`/api/v1/pipeline-runs/${runId}/inference-results`)
+      );
+      if (!res.ok) return [];
+      return res.json();
+    },
+    staleTime: 30_000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Loading inference results…
+      </div>
+    );
+  }
+
+  if (results.length === 0) return null;
+
+  return (
+    <>
+      <div className="mt-3 rounded-md border overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="py-2 text-xs">Label</TableHead>
+              <TableHead className="py-2 text-xs text-right">Plots</TableHead>
+              <TableHead className="py-2 text-xs text-right">Predictions</TableHead>
+              <TableHead className="py-2 text-xs">Classes</TableHead>
+              <TableHead className="py-2 text-xs text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {results.map((r) => (
+              <TableRow key={r.label} className="text-xs">
+                <TableCell className="py-2 font-medium">{r.label}</TableCell>
+                <TableCell className="py-2 text-right">{r.plot_count}</TableCell>
+                <TableCell className="py-2 text-right">{r.total_predictions}</TableCell>
+                <TableCell className="py-2">
+                  <div className="flex flex-wrap gap-1">
+                    {Object.entries(r.classes).map(([cls, count]) => (
+                      <Badge key={cls} variant="outline" className="text-[10px] px-1 py-0">
+                        {cls}: {count}
+                      </Badge>
+                    ))}
+                  </div>
+                </TableCell>
+                <TableCell className="py-2 text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      title="Download CSV"
+                      onClick={() =>
+                        tauriDownload(
+                          `/api/v1/files/serve?path=${encodeURIComponent(r.csv_rel_path)}`,
+                          `${r.label}_predictions.csv`,
+                          "GET",
+                          [{ name: "CSV", extensions: ["csv"] }]
+                        )
+                      }
+                    >
+                      <Download className="h-3 w-3" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-destructive hover:text-destructive"
+                      title="Delete"
+                      disabled={isDeleting}
+                      onClick={() => setConfirmLabel(r.label)}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+
+      <ConfirmDeleteDialog
+        open={!!confirmLabel}
+        title="Delete inference results"
+        description={`Delete inference results for "${confirmLabel}"? This will remove the predictions CSV.`}
+        isDeleting={isDeleting}
+        onConfirm={() => {
+          if (confirmLabel) onDelete(confirmLabel);
+          setConfirmLabel(null);
+        }}
+        onCancel={() => setConfirmLabel(null)}
+      />
+    </>
+  );
 }
 
 function StepRow({
@@ -915,17 +1188,22 @@ function PlotBoundaryVersionsPanel({
   versions,
   orthoVersions,
   onRename,
+  onDelete,
   downloadingCropsBv,
   onDownloadCrops,
+  isDeleting,
 }: {
   versions: PlotBoundaryVersion[];
   orthoVersions: OrthoVersion[];
   onRename: (version: number, name: string) => void;
+  onDelete: (version: number) => void;
   downloadingCropsBv: number | null;
   onDownloadCrops: (boundaryVersion: number, orthoVersion: number) => void;
+  isDeleting: boolean;
 }) {
   const [editingVersion, setEditingVersion] = useState<number | null>(null);
   const [editingName, setEditingName] = useState("");
+  const [confirmVersion, setConfirmVersion] = useState<number | null>(null);
   const [cropDialog, setCropDialog] = useState<{
     boundaryVersion: number;
   } | null>(null);
@@ -1051,6 +1329,16 @@ function PlotBoundaryVersionsPanel({
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-red-500 hover:text-red-600"
+                      title="Delete"
+                      disabled={isDeleting}
+                      onClick={() => setConfirmVersion(v.version)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
                   </div>
                 </TableCell>
               </TableRow>
@@ -1058,6 +1346,18 @@ function PlotBoundaryVersionsPanel({
           </TableBody>
         </Table>
       </div>
+
+      <ConfirmDeleteDialog
+        open={confirmVersion !== null}
+        title="Delete plot boundary?"
+        description={`This will permanently delete plot boundary v${confirmVersion} and its GeoJSON file. This cannot be undone.`}
+        isDeleting={isDeleting}
+        onConfirm={() => {
+          if (confirmVersion !== null) onDelete(confirmVersion);
+          setConfirmVersion(null);
+        }}
+        onCancel={() => setConfirmVersion(null)}
+      />
 
       {/* Ortho selection dialog for crop download */}
       <Dialog
@@ -1326,6 +1626,70 @@ export function RunDetail() {
     onError: () => showErrorToast("Failed to delete orthomosaic version"),
   });
 
+  const deletePlotBoundaryMutation = useMutation({
+    mutationFn: (version: number) =>
+      fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/plot-boundaries/${version}`), {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+        },
+      }).then((r) => {
+        if (!r.ok) throw new Error("Failed to delete version");
+        return r.json();
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["plot-boundaries", runId] });
+      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
+    },
+    onError: () => showErrorToast("Failed to delete plot boundary version"),
+  });
+
+  const deleteTraitRecordMutation = useMutation({
+    mutationFn: (id: string) =>
+      fetch(apiUrl(`/api/v1/analyze/trait-records/${id}`), {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+        },
+      }).then((r) => {
+        if (!r.ok) throw new Error("Failed to delete trait record");
+        return r.json();
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["trait-records-run", runId] });
+      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
+    },
+    onError: () => showErrorToast("Failed to delete trait record"),
+  });
+
+  // Ground: delete an inference result by label
+  const deleteInferenceMutation = useMutation({
+    mutationFn: (label: string) =>
+      fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/inference-results/${encodeURIComponent(label)}`), {
+        method: "DELETE",
+      }).then((r) => {
+        if (!r.ok) throw new Error("Failed to delete inference result");
+        return r.json();
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["inference-results", runId] });
+      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
+    },
+    onError: () => showErrorToast("Failed to delete inference result"),
+  });
+
+  // Ground: check AgRowStitch availability for stitching step warning
+  const { data: capabilities } = useQuery({
+    queryKey: ["capabilities"],
+    queryFn: async () => {
+      const res = await fetch(apiUrl("/api/v1/utils/capabilities/"));
+      if (!res.ok) return null;
+      return res.json() as Promise<{ agrowstitch: { available: boolean }; cuda_available: boolean } | null>;
+    },
+    enabled: pipelineType === "ground",
+    staleTime: Infinity,
+  });
+
   const renameOrthoMutation = useMutation({
     mutationFn: ({ version, name }: { version: number; name: string }) =>
       fetch(
@@ -1555,6 +1919,7 @@ export function RunDetail() {
           progress: 100,
           message: "Done",
         });
+        queryClient.invalidateQueries({ queryKey: ["trait-records-run", runId] });
       } else if (
         wasStopped ||
         (!run.steps_completed?.trait_extraction && runStatus !== "failed")
@@ -1938,11 +2303,14 @@ export function RunDetail() {
                     ? "ready"
                     : status;
 
-              // Warn on orthomosaic if GCP was skipped
+              // Step-specific warnings
               const warning =
-                step.key === "orthomosaic" &&
-                !run.steps_completed?.gcp_selection
+                step.key === "orthomosaic" && !run.steps_completed?.gcp_selection
                   ? "GCP selection was skipped — orthomosaic accuracy may be reduced"
+                  : step.key === "stitching" && capabilities && !capabilities.agrowstitch.available
+                  ? "AgRowStitch not found — stitching will fail. Check vendor/AgRowStitch/ or set AGROWSTITCH_PATH."
+                  : step.key === "stitching" && capabilities?.agrowstitch.available && !capabilities.cuda_available
+                  ? "CUDA not available — stitching will run on CPU and may be slow"
                   : undefined;
 
               return (
@@ -1983,6 +2351,15 @@ export function RunDetail() {
                         />
                       );
                     }
+                    if (step.key === "trait_extraction") {
+                      return (
+                        <TraitRecordsPanel
+                          runId={runId}
+                          onDelete={(id) => deleteTraitRecordMutation.mutate(id)}
+                          isDeleting={deleteTraitRecordMutation.isPending}
+                        />
+                      );
+                    }
                     if (
                       step.key === "plot_boundary_prep" &&
                       pipelineType === "aerial" &&
@@ -1999,8 +2376,19 @@ export function RunDetail() {
                               name,
                             })
                           }
+                          onDelete={(v) => deletePlotBoundaryMutation.mutate(v)}
+                          isDeleting={deletePlotBoundaryMutation.isPending}
                           downloadingCropsBv={downloadingCropsBv}
                           onDownloadCrops={handleBoundaryCropDownload}
+                        />
+                      );
+                    }
+                    if (step.key === "inference" && pipelineType === "ground") {
+                      return (
+                        <GroundInferencePanel
+                          runId={runId}
+                          onDelete={(label) => deleteInferenceMutation.mutate(label)}
+                          isDeleting={deleteInferenceMutation.isPending}
                         />
                       );
                     }

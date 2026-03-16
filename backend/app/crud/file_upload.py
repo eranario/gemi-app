@@ -66,7 +66,7 @@ def delete_file_upload(*, session: Session, id: uuid.UUID) -> None:
 SUGGESTABLE_FIELDS = ["experiment", "location", "population", "platform", "sensor"]
 
 # Fields ordered for cascading: each field is filtered by all preceding fields.
-_CASCADE_ORDER = ["data_type", "experiment", "location", "population", "platform", "sensor"]
+_CASCADE_ORDER = ["experiment", "location", "population", "platform", "sensor"]
 
 
 def get_distinct_field_values(

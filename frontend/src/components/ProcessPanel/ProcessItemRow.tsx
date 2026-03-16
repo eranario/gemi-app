@@ -46,7 +46,7 @@ export function ProcessItemRow({ item }: { item: ProcessItem }) {
         {item.name}
       </span>
       <span className="text-muted-foreground shrink-0 text-xs">
-        {item.error || config.label}
+        {item.error || item.label || config.label}
       </span>
     </div>
   )

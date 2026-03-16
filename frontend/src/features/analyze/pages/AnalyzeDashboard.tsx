@@ -8,8 +8,17 @@
  *           lists records grouped by workspace/pipeline; click to load.
  */
 
-import { useMemo, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import {
+  type ColumnDef,
+  type ColumnFiltersState,
+  getCoreRowModel,
+  getFilteredRowModel,
+  getFacetedRowModel,
+  useReactTable,
+} from "@tanstack/react-table";
+import { ColumnFilter } from "@/features/files/components/ColumnFilter";
 import {
   BarChart2,
   ChevronDown,
@@ -19,20 +28,22 @@ import {
   EyeOff,
   Loader2,
   Map as MapIcon,
+  PanelLeftClose,
+  PanelLeftOpen,
   Table2,
-} from "lucide-react"
-import { analyzeApi, versionLabel, type TraitRecord } from "../api"
-import { TraitMap } from "../components/TraitMap"
-import { MetricSelector } from "../components/MetricSelector"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+} from "lucide-react";
+import { analyzeApi, versionLabel, type TraitRecord } from "../api";
+import { TraitMap } from "../components/TraitMap";
+import { MetricSelector } from "../components/MetricSelector";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -40,39 +51,43 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+} from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function fmt(n: number | null | undefined, digits = 3): string {
-  if (n == null) return "—"
-  return n.toFixed(digits)
+  if (n == null) return "—";
+  return n.toFixed(digits);
 }
 
 function downloadCsv(content: string, filename: string) {
-  const blob = new Blob([content], { type: "text/csv" })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement("a")
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
+  const blob = new Blob([content], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function featuresToCsv(features: GeoJSON.Feature[]): string {
-  if (!features.length) return ""
-  const cols = [...new Set(features.flatMap((f) => Object.keys(f.properties ?? {})))]
-  const header = cols.join(",")
+  if (!features.length) return "";
+  const cols = [
+    ...new Set(features.flatMap((f) => Object.keys(f.properties ?? {}))),
+  ];
+  const header = cols.join(",");
   const lines = features.map((f) =>
     cols
       .map((c) => {
-        const v = f.properties?.[c]
-        return typeof v === "string" && v.includes(",") ? `"${v}"` : String(v ?? "")
+        const v = f.properties?.[c];
+        return typeof v === "string" && v.includes(",")
+          ? `"${v}"`
+          : String(v ?? "");
       })
-      .join(","),
-  )
-  return [header, ...lines].join("\n")
+      .join(",")
+  );
+  return [header, ...lines].join("\n");
 }
 
 // ── Version badge ──────────────────────────────────────────────────────────────
@@ -82,18 +97,19 @@ function VersionBadge({
   name,
   label,
 }: {
-  version: number | null
-  name: string | null | undefined
-  label: string
+  version: number | null;
+  name: string | null | undefined;
+  label: string;
 }) {
-  if (version == null) return <span className="text-muted-foreground text-xs">—</span>
+  if (version == null)
+    return <span className="text-muted-foreground text-xs">—</span>;
   return (
     <div className="flex flex-col gap-0.5">
-      <Badge variant="outline" className="text-xs w-fit">
+      <Badge variant="outline" className="w-fit text-xs">
         {label} {versionLabel(version, name)}
       </Badge>
     </div>
-  )
+  );
 }
 
 // ── Expandable per-plot table ──────────────────────────────────────────────────
@@ -103,53 +119,67 @@ function ExpandedPlotTable({ recordId }: { recordId: string }) {
     queryKey: ["trait-record-geojson", recordId],
     queryFn: () => analyzeApi.getTraitRecordGeojson(recordId),
     staleTime: 60_000,
-  })
+  });
 
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2 py-4 px-6 text-muted-foreground text-sm">
-        <Loader2 className="w-4 h-4 animate-spin" />
+      <div className="text-muted-foreground flex items-center gap-2 px-6 py-4 text-sm">
+        <Loader2 className="h-4 w-4 animate-spin" />
         Loading plot data…
       </div>
-    )
+    );
   }
 
-  const features = data?.geojson?.features ?? []
+  const features = data?.geojson?.features ?? [];
   if (!features.length) {
-    return <p className="px-6 py-3 text-sm text-muted-foreground">No plot data found.</p>
+    return (
+      <p className="text-muted-foreground px-6 py-3 text-sm">
+        No plot data found.
+      </p>
+    );
   }
 
   // Determine columns: metadata first, then numeric traits
-  const allKeys = [...new Set(features.flatMap((f) => Object.keys(f.properties ?? {})))]
+  const allKeys = [
+    ...new Set(features.flatMap((f) => Object.keys(f.properties ?? {}))),
+  ];
   const metaCols = allKeys.filter(
     (k) =>
       !["", "geometry"].includes(k) &&
-      typeof features[0]?.properties?.[k] !== "number",
-  )
-  const numCols = data?.metric_columns ?? []
-  const cols = [...metaCols, ...numCols].filter((c) => c !== "")
+      typeof features[0]?.properties?.[k] !== "number"
+  );
+  const numCols = data?.metric_columns ?? [];
+  const cols = [...metaCols, ...numCols].filter((c) => c !== "");
 
   function handleDownload() {
-    downloadCsv(featuresToCsv(features), `traits_${recordId}.csv`)
+    downloadCsv(featuresToCsv(features), `traits_${recordId}.csv`);
   }
 
   return (
-    <div className="border-t bg-muted/20">
-      <div className="px-6 py-2 flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">
+    <div className="bg-muted/20 border-t">
+      <div className="flex items-center justify-between px-6 py-2">
+        <p className="text-muted-foreground text-xs">
           {features.length} plots · {numCols.join(", ")}
         </p>
-        <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={handleDownload}>
-          <Download className="w-3 h-3 mr-1.5" />
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 text-xs"
+          onClick={handleDownload}
+        >
+          <Download className="mr-1.5 h-3 w-3" />
           Download CSV
         </Button>
       </div>
-      <div className="overflow-x-auto max-h-64 overflow-y-auto">
+      <div className="max-h-64 overflow-x-auto overflow-y-auto">
         <Table>
           <TableHeader>
             <TableRow>
               {cols.map((c) => (
-                <TableHead key={c} className="text-xs whitespace-nowrap px-3 py-1.5">
+                <TableHead
+                  key={c}
+                  className="px-3 py-1.5 text-xs whitespace-nowrap"
+                >
                   {c.replace(/_/g, " ")}
                 </TableHead>
               ))}
@@ -159,12 +189,12 @@ function ExpandedPlotTable({ recordId }: { recordId: string }) {
             {features.map((f, i) => (
               <TableRow key={i} className="text-xs">
                 {cols.map((c) => {
-                  const v = f.properties?.[c]
+                  const v = f.properties?.[c];
                   return (
                     <TableCell key={c} className="px-3 py-1 font-mono">
                       {typeof v === "number" ? v.toFixed(3) : String(v ?? "—")}
                     </TableCell>
-                  )
+                  );
                 })}
               </TableRow>
             ))}
@@ -172,98 +202,91 @@ function ExpandedPlotTable({ recordId }: { recordId: string }) {
         </Table>
       </div>
     </div>
-  )
+  );
 }
 
 // ── Table tab ─────────────────────────────────────────────────────────────────
 
+const traitRecordColumns: ColumnDef<TraitRecord>[] = [
+  { id: "expand", enableColumnFilter: false },
+  {
+    id: "workspace_name",
+    accessorKey: "workspace_name",
+    filterFn: (row, id, values: string[]) => values.includes(row.getValue(id)),
+  },
+  {
+    id: "pipeline_name",
+    accessorKey: "pipeline_name",
+    filterFn: (row, id, values: string[]) => values.includes(row.getValue(id)),
+  },
+  {
+    id: "date",
+    accessorKey: "date",
+    filterFn: (row, id, values: string[]) => values.includes(row.getValue(id)),
+  },
+  { id: "ortho", enableColumnFilter: false },
+  { id: "boundary", enableColumnFilter: false },
+  { id: "plot_count", enableColumnFilter: false },
+  { id: "vf_avg", enableColumnFilter: false },
+  { id: "height_avg", enableColumnFilter: false },
+];
+
 function TableTab({ records }: { records: TraitRecord[] }) {
-  const [wsFilter, setWsFilter] = useState("__all__")
-  const [pipelineFilter, setPipelineFilter] = useState("__all__")
-  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const workspaces = useMemo(
-    () => [...new Set(records.map((r) => r.workspace_name))].sort(),
-    [records],
-  )
-  const pipelines = useMemo(
-    () =>
-      [
-        ...new Set(
-          records
-            .filter((r) => wsFilter === "__all__" || r.workspace_name === wsFilter)
-            .map((r) => r.pipeline_name),
-        ),
-      ].sort(),
-    [records, wsFilter],
-  )
+  const table = useReactTable({
+    data: records,
+    columns: traitRecordColumns,
+    state: { columnFilters },
+    onColumnFiltersChange: setColumnFilters,
+    getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    getFacetedRowModel: getFacetedRowModel(),
+  });
 
-  const filtered = useMemo(
-    () =>
-      records.filter((r) => {
-        if (wsFilter !== "__all__" && r.workspace_name !== wsFilter) return false
-        if (pipelineFilter !== "__all__" && r.pipeline_name !== pipelineFilter) return false
-        return true
-      }),
-    [records, wsFilter, pipelineFilter],
-  )
+  const filtered = table.getFilteredRowModel().rows.map((r) => r.original);
 
   function toggleExpanded(id: string) {
-    setExpandedId((prev) => (prev === id ? null : id))
+    setExpandedId((prev) => (prev === id ? null : id));
   }
 
   return (
     <div className="space-y-4">
-      {/* Filters */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <Select
-          value={wsFilter}
-          onValueChange={(v) => {
-            setWsFilter(v)
-            setPipelineFilter("__all__")
-          }}
-        >
-          <SelectTrigger className="h-8 w-48 text-xs">
-            <SelectValue placeholder="All workspaces" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all__">All workspaces</SelectItem>
-            {workspaces.map((w) => (
-              <SelectItem key={w} value={w} className="text-xs">
-                {w}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select value={pipelineFilter} onValueChange={setPipelineFilter}>
-          <SelectTrigger className="h-8 w-48 text-xs">
-            <SelectValue placeholder="All pipelines" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all__">All pipelines</SelectItem>
-            {pipelines.map((p) => (
-              <SelectItem key={p} value={p} className="text-xs">
-                {p}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <span className="text-xs text-muted-foreground ml-auto">
+      <div className="text-muted-foreground flex items-center gap-1 text-xs">
+        <span>
           {filtered.length} record{filtered.length !== 1 ? "s" : ""}
         </span>
+        {columnFilters.length > 0 && (
+          <button
+            onClick={() => setColumnFilters([])}
+            className="text-primary ml-2 hover:underline"
+          >
+            Clear filters
+          </button>
+        )}
       </div>
 
-      {/* Table */}
-      <div className="rounded-lg border overflow-hidden">
+      <div className="overflow-hidden rounded-lg border">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="w-8" />
-              <TableHead>Workspace</TableHead>
-              <TableHead>Pipeline</TableHead>
-              <TableHead>Date</TableHead>
+              <TableHead>
+                <ColumnFilter
+                  column={table.getColumn("workspace_name")!}
+                  title="Workspace"
+                />
+              </TableHead>
+              <TableHead>
+                <ColumnFilter
+                  column={table.getColumn("pipeline_name")!}
+                  title="Pipeline"
+                />
+              </TableHead>
+              <TableHead>
+                <ColumnFilter column={table.getColumn("date")!} title="Date" />
+              </TableHead>
               <TableHead>Ortho</TableHead>
               <TableHead>Boundary</TableHead>
               <TableHead className="text-right">Plots</TableHead>
@@ -276,7 +299,7 @@ function TableTab({ records }: { records: TraitRecord[] }) {
               <TableRow>
                 <TableCell
                   colSpan={9}
-                  className="text-center text-muted-foreground py-8 text-sm"
+                  className="text-muted-foreground py-8 text-center text-sm"
                 >
                   No trait records match the current filter.
                 </TableCell>
@@ -286,17 +309,19 @@ function TableTab({ records }: { records: TraitRecord[] }) {
                 <>
                   <TableRow
                     key={r.id}
-                    className="cursor-pointer hover:bg-muted/40"
+                    className="hover:bg-muted/40 cursor-pointer"
                     onClick={() => toggleExpanded(r.id)}
                   >
                     <TableCell className="px-3">
                       {expandedId === r.id ? (
-                        <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+                        <ChevronDown className="text-muted-foreground h-3.5 w-3.5" />
                       ) : (
-                        <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
+                        <ChevronRight className="text-muted-foreground h-3.5 w-3.5" />
                       )}
                     </TableCell>
-                    <TableCell className="text-sm font-medium">{r.workspace_name}</TableCell>
+                    <TableCell className="text-sm font-medium">
+                      {r.workspace_name}
+                    </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1.5">
                         <Badge variant="outline" className="text-xs capitalize">
@@ -344,86 +369,121 @@ function TableTab({ records }: { records: TraitRecord[] }) {
         </Table>
       </div>
     </div>
-  )
+  );
+}
+
+// ── Collapsible workspace group ────────────────────────────────────────────────
+
+function CollapsibleWorkspace({
+  name,
+  children,
+}: {
+  name: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="text-muted-foreground hover:text-foreground flex w-full items-center gap-1 px-3 pt-2 pb-0.5 text-xs font-semibold tracking-wide uppercase transition-colors"
+      >
+        <ChevronRight
+          className={`h-3 w-3 flex-shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
+        />
+        <span className="truncate">{name}</span>
+      </button>
+      {open && children}
+    </div>
+  );
 }
 
 // ── Map tab ───────────────────────────────────────────────────────────────────
 
 function MapTab({ records }: { records: TraitRecord[] }) {
-  const [wsFilter, setWsFilter] = useState("__all__")
-  const [pipelineFilter, setPipelineFilter] = useState("__all__")
-  const [selectedId, setSelectedId] = useState<string | null>(() => records[0]?.id ?? null)
-  const [selectedMetric, setSelectedMetric] = useState<string | null>(null)
-  const [showPolygons, setShowPolygons] = useState(true)
+  const [wsFilter, setWsFilter] = useState("__all__");
+  const [pipelineFilter, setPipelineFilter] = useState("__all__");
+  const [selectedId, setSelectedId] = useState<string | null>(
+    () => records[0]?.id ?? null
+  );
+  const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
+  const [showPolygons, setShowPolygons] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const workspaces = useMemo(
     () => [...new Set(records.map((r) => r.workspace_name))].sort(),
-    [records],
-  )
+    [records]
+  );
 
   const pipelines = useMemo(
     () =>
       [
         ...new Set(
           records
-            .filter((r) => wsFilter === "__all__" || r.workspace_name === wsFilter)
-            .map((r) => r.pipeline_name),
+            .filter(
+              (r) => wsFilter === "__all__" || r.workspace_name === wsFilter
+            )
+            .map((r) => r.pipeline_name)
         ),
       ].sort(),
-    [records, wsFilter],
-  )
+    [records, wsFilter]
+  );
 
   const filteredRecords = useMemo(
     () =>
       records.filter((r) => {
-        if (wsFilter !== "__all__" && r.workspace_name !== wsFilter) return false
-        if (pipelineFilter !== "__all__" && r.pipeline_name !== pipelineFilter) return false
-        return true
+        if (wsFilter !== "__all__" && r.workspace_name !== wsFilter)
+          return false;
+        if (pipelineFilter !== "__all__" && r.pipeline_name !== pipelineFilter)
+          return false;
+        return true;
       }),
-    [records, wsFilter, pipelineFilter],
-  )
+    [records, wsFilter, pipelineFilter]
+  );
 
   // Group for sidebar display: workspace → pipeline → records
   const grouped = useMemo(() => {
-    const map = new Map<string, Map<string, TraitRecord[]>>()
+    const map = new Map<string, Map<string, TraitRecord[]>>();
     for (const r of filteredRecords) {
-      if (!map.has(r.workspace_name)) map.set(r.workspace_name, new Map())
-      const pMap = map.get(r.workspace_name)!
-      if (!pMap.has(r.pipeline_name)) pMap.set(r.pipeline_name, [])
-      pMap.get(r.pipeline_name)!.push(r)
+      if (!map.has(r.workspace_name)) map.set(r.workspace_name, new Map());
+      const pMap = map.get(r.workspace_name)!;
+      if (!pMap.has(r.pipeline_name)) pMap.set(r.pipeline_name, []);
+      pMap.get(r.pipeline_name)!.push(r);
     }
-    return map
-  }, [filteredRecords])
+    return map;
+  }, [filteredRecords]);
 
   const { data: traitsData, isLoading: traitsLoading } = useQuery({
     queryKey: ["trait-record-geojson", selectedId],
     queryFn: () => analyzeApi.getTraitRecordGeojson(selectedId!),
     enabled: !!selectedId,
     staleTime: 60_000,
-  })
+  });
 
   // Auto-pick the first metric when data loads; fall back when user hasn't chosen one yet.
   // Derived rather than stored in state to avoid side effects in render callbacks.
   const effectiveMetric =
-    selectedMetric ?? traitsData?.metric_columns?.[0] ?? null
+    selectedMetric ?? traitsData?.metric_columns?.[0] ?? null;
 
   const { data: orthoInfo } = useQuery({
     queryKey: ["trait-record-ortho", selectedId],
     queryFn: () => analyzeApi.getTraitRecordOrthoInfo(selectedId!),
     enabled: !!selectedId,
     staleTime: 60_000,
-  })
+  });
 
   return (
     <div className="flex h-full min-h-0">
       {/* Left panel */}
-      <div className="w-56 flex-shrink-0 border-r flex flex-col overflow-hidden">
-        <div className="p-3 border-b space-y-2">
+      <div
+        className={`flex flex-shrink-0 flex-col overflow-hidden border-r transition-all duration-200 ${sidebarOpen ? "w-56" : "w-0 border-r-0"}`}
+      >
+        <div className="space-y-2 border-b p-3">
           <Select
             value={wsFilter}
             onValueChange={(v) => {
-              setWsFilter(v)
-              setPipelineFilter("__all__")
+              setWsFilter(v);
+              setPipelineFilter("__all__");
             }}
           >
             <SelectTrigger className="h-7 text-xs">
@@ -453,28 +513,27 @@ function MapTab({ records }: { records: TraitRecord[] }) {
           </Select>
         </div>
 
-        <div className="overflow-y-auto flex-1 py-1">
+        <div className="flex-1 overflow-y-auto py-1">
           {[...grouped.entries()].map(([ws, pipelineMap]) => (
-            <div key={ws}>
-              <p className="px-3 pt-2 pb-0.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                {ws}
-              </p>
+            <CollapsibleWorkspace key={ws} name={ws}>
               {[...pipelineMap.entries()].map(([pipeline, recs]) => (
                 <div key={pipeline}>
-                  <p className="px-3 py-0.5 text-xs text-muted-foreground">{pipeline}</p>
+                  <p className="text-muted-foreground px-3 py-0.5 text-xs">
+                    {pipeline}
+                  </p>
                   {recs.map((r) => (
                     <button
                       key={r.id}
                       onClick={() => {
-                        setSelectedId(r.id)
-                        setSelectedMetric(null)
+                        setSelectedId(r.id);
+                        setSelectedMetric(null);
                       }}
-                      className={`w-full text-left px-4 py-1.5 text-xs hover:bg-muted/60 transition-colors ${
+                      className={`hover:bg-muted/60 w-full px-4 py-1.5 text-left text-xs transition-colors ${
                         selectedId === r.id ? "bg-muted font-medium" : ""
                       }`}
                     >
                       <div className="truncate">{r.date}</div>
-                      <div className="text-muted-foreground text-[11px] mt-0.5 space-y-0.5">
+                      <div className="text-muted-foreground mt-0.5 space-y-0.5 text-[11px]">
                         <div className="truncate">
                           <span className="text-foreground/50">Ortho:</span>{" "}
                           {versionLabel(r.ortho_version, r.ortho_name)}
@@ -490,10 +549,10 @@ function MapTab({ records }: { records: TraitRecord[] }) {
                   ))}
                 </div>
               ))}
-            </div>
+            </CollapsibleWorkspace>
           ))}
           {filteredRecords.length === 0 && (
-            <p className="px-3 py-4 text-xs text-muted-foreground text-center">
+            <p className="text-muted-foreground px-3 py-4 text-center text-xs">
               No records to show.
             </p>
           )}
@@ -501,9 +560,9 @@ function MapTab({ records }: { records: TraitRecord[] }) {
 
         {/* Metric selector + toggle */}
         {traitsData && traitsData.metric_columns.length > 0 && (
-          <div className="border-t p-3 space-y-1.5">
+          <div className="space-y-1.5 border-t p-3">
             <div className="flex items-center justify-between">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
                 Color by
               </p>
               <button
@@ -511,7 +570,11 @@ function MapTab({ records }: { records: TraitRecord[] }) {
                 className="text-muted-foreground hover:text-foreground transition-colors"
                 title={showPolygons ? "Hide polygons" : "Show polygons"}
               >
-                {showPolygons ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                {showPolygons ? (
+                  <Eye className="h-3.5 w-3.5" />
+                ) : (
+                  <EyeOff className="h-3.5 w-3.5" />
+                )}
               </button>
             </div>
             <MetricSelector
@@ -524,15 +587,28 @@ function MapTab({ records }: { records: TraitRecord[] }) {
       </div>
 
       {/* Map */}
-      <div className="flex-1 relative min-w-0">
+      <div className="relative min-w-0 flex-1">
+        <button
+          onClick={() => setSidebarOpen((v) => !v)}
+          className="bg-background/80 text-muted-foreground hover:text-foreground absolute top-2 left-2 z-10 rounded border p-1 shadow-sm backdrop-blur-sm transition-colors"
+          title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+        >
+          {sidebarOpen ? (
+            <PanelLeftClose className="h-4 w-4" />
+          ) : (
+            <PanelLeftOpen className="h-4 w-4" />
+          )}
+        </button>
         {!selectedId ? (
-          <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground">
-            <MapIcon className="w-10 h-10" />
-            <p className="text-sm">Select a record from the list to view on the map.</p>
+          <div className="text-muted-foreground flex h-full flex-col items-center justify-center gap-2">
+            <MapIcon className="h-10 w-10" />
+            <p className="text-sm">
+              Select a record from the list to view on the map.
+            </p>
           </div>
         ) : traitsLoading ? (
-          <div className="flex items-center justify-center h-full gap-2 text-muted-foreground">
-            <Loader2 className="w-5 h-5 animate-spin" />
+          <div className="text-muted-foreground flex h-full items-center justify-center gap-2">
+            <Loader2 className="h-5 w-5 animate-spin" />
             Loading traits…
           </div>
         ) : (
@@ -547,7 +623,7 @@ function MapTab({ records }: { records: TraitRecord[] }) {
         )}
       </div>
     </div>
-  )
+  );
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -557,47 +633,45 @@ export function AnalyzeDashboard() {
     queryKey: ["trait-records"],
     queryFn: analyzeApi.listTraitRecords,
     staleTime: 30_000,
-  })
+  });
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[40vh] gap-2 text-muted-foreground">
-        <Loader2 className="w-5 h-5 animate-spin" />
+      <div className="text-muted-foreground flex min-h-[40vh] items-center justify-center gap-2">
+        <Loader2 className="h-5 w-5 animate-spin" />
         Loading…
       </div>
-    )
+    );
   }
 
   if (records.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[40vh] gap-3 text-muted-foreground">
-        <BarChart2 className="w-10 h-10" />
+      <div className="text-muted-foreground flex min-h-[40vh] flex-col items-center justify-center gap-3">
+        <BarChart2 className="h-10 w-10" />
         <p className="text-sm">
-          No trait records yet. Complete a Trait Extraction step to see results here.
+          No trait records yet. Complete a Trait Extraction step to see results
+          here.
         </p>
       </div>
-    )
+    );
   }
 
   return (
     <div className="flex flex-col" style={{ height: "calc(100vh - 64px)" }}>
       {/* Header */}
-      <div className="px-6 pt-5 pb-3 flex-shrink-0">
+      <div className="flex-shrink-0 px-6 pt-5 pb-3">
         <h1 className="text-2xl font-semibold">Analyze</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          {records.length} trait extraction{records.length !== 1 ? "s" : ""}
-        </p>
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="table" className="flex-1 flex flex-col min-h-0 px-6">
-        <TabsList className="self-start mb-4 flex-shrink-0">
+      <Tabs defaultValue="table" className="flex min-h-0 flex-1 flex-col px-6">
+        <TabsList className="mb-4 flex-shrink-0 self-start">
           <TabsTrigger value="table" className="gap-1.5">
-            <Table2 className="w-3.5 h-3.5" />
+            <Table2 className="h-3.5 w-3.5" />
             Table
           </TabsTrigger>
           <TabsTrigger value="map" className="gap-1.5">
-            <MapIcon className="w-3.5 h-3.5" />
+            <MapIcon className="h-3.5 w-3.5" />
             Map
           </TabsTrigger>
         </TabsList>
@@ -608,14 +682,14 @@ export function AnalyzeDashboard() {
 
         <TabsContent
           value="map"
-          className="mt-0 flex-1 min-h-0 data-[state=inactive]:hidden"
+          className="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden"
           style={{ display: undefined }}
         >
-          <div className="h-full rounded-lg border overflow-hidden">
+          <div className="h-full overflow-hidden rounded-lg border">
             <MapTab records={records} />
           </div>
         </TabsContent>
       </Tabs>
     </div>
-  )
+  );
 }

@@ -345,6 +345,67 @@ def list_images(
     }
 
 
+# ── Ground: GPS trajectory data (for plot marking map) ───────────────────────
+
+@router.get("/pipeline-runs/{id}/gps-data")
+def get_gps_data(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> dict[str, Any]:
+    """
+    Return GPS trajectory points from msgs_synced.csv for the plot marking map.
+    Each point includes lat, lon, and the image filename so the frontend can
+    highlight the current image's position on the map.
+    """
+    import pandas as pd
+
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+
+    # Same fallback lookup used by ground.py stitching
+    candidates = [
+        paths.msgs_synced,
+        paths.raw / "Metadata" / "msgs_synced.csv",
+        paths.raw / "RGB" / "Metadata" / "msgs_synced.csv",
+        paths.raw / "msgs_synced.csv",
+    ]
+    csv_path = next((p for p in candidates if p.exists()), None)
+    if not csv_path:
+        return {"points": [], "count": 0}
+
+    try:
+        df = pd.read_csv(csv_path)
+        df.columns = df.columns.str.strip()
+    except Exception:
+        return {"points": [], "count": 0}
+
+    lat_col = next((c for c in df.columns if c.lower() in ("lat", "latitude")), None)
+    lon_col = next((c for c in df.columns if c.lower() in ("lon", "lng", "longitude")), None)
+    img_col = next((c for c in df.columns if c in ("/top/rgb_file", "rgb_file", "image_path")), None)
+
+    if not lat_col or not lon_col:
+        return {"points": [], "count": 0}
+
+    points = []
+    for _, row in df.iterrows():
+        try:
+            lat = float(row[lat_col])
+            lon = float(row[lon_col])
+        except (ValueError, TypeError):
+            continue
+        if lat != lat or lon != lon:  # NaN check
+            continue
+        point: dict[str, Any] = {"lat": lat, "lon": lon}
+        if img_col:
+            raw = row.get(img_col)
+            # Store just the basename so it matches the filenames returned by /images
+            point["image"] = str(raw).split("/")[-1] if raw and str(raw) != "nan" else None
+        points.append(point)
+
+    return {"points": points, "count": len(points)}
+
+
 # ── Apply existing boundaries to a new run (ground + aerial) ─────────────────
 
 @router.post("/pipeline-runs/{id}/apply-boundaries")
@@ -378,6 +439,13 @@ def apply_boundaries(
         )
     existing_outputs["plot_boundary_prep"] = paths.rel(paths.plot_boundary_geojson)
     existing_steps["plot_boundary_prep"] = True
+
+    # Ground: if plot_borders.csv already exists from a prior run on this pipeline,
+    # mark plot_marking as complete too so the user doesn't have to redo it.
+    if pipeline.type == "ground" and paths.plot_borders.exists():
+        existing_outputs["plot_marking"] = paths.rel(paths.plot_borders)
+        existing_steps["plot_marking"] = True
+
     update_pipeline_run(
         session=session,
         db_run=run,
@@ -1606,6 +1674,37 @@ def rename_plot_boundary(
     return {"version": version, "name": target["name"]}
 
 
+@router.delete("/pipeline-runs/{id}/plot-boundaries/{version}", status_code=200)
+def delete_plot_boundary(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    version: int,
+) -> None:
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+    existing_outputs = dict(run.outputs or {})
+    versions = _get_plot_boundary_versions(existing_outputs)
+    target = next((v for v in versions if v["version"] == version), None)
+    if not target:
+        raise HTTPException(404, f"Plot boundary version {version} not found")
+
+    # Delete the GeoJSON file
+    geojson_rel = target.get("geojson_path")
+    if geojson_rel:
+        paths.abs(geojson_rel).unlink(missing_ok=True)
+
+    # Remove from list
+    versions = [v for v in versions if v["version"] != version]
+    existing_outputs["plot_boundaries"] = versions
+
+    update_pipeline_run(
+        session=session,
+        db_run=run,
+        run_in=PipelineRunUpdate(outputs=existing_outputs),
+    )
+
+
 @router.post("/pipeline-runs/{id}/plot-boundaries/{boundary_version}/download-crops")
 def download_crops_for_boundary(
     session: SessionDep,
@@ -1840,6 +1939,101 @@ def inference_results(
     }
 
 
+# ── Ground: inference results summary ────────────────────────────────────────
+
+@router.get("/pipeline-runs/{id}/inference-results")
+def get_inference_results(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> list[dict]:
+    """
+    Return a summary of each inference CSV stored in run.outputs["inference"].
+
+    Each entry: { label, plot_count, total_predictions, classes, csv_rel_path }
+    """
+    import csv as _csv_mod
+
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+    inference_map: dict[str, str] = (run.outputs or {}).get("inference", {})
+
+    if not inference_map:
+        return []
+
+    results = []
+    for label, rel_path in inference_map.items():
+        abs_path = paths.abs(rel_path)
+        entry: dict[str, Any] = {
+            "label": label,
+            "csv_rel_path": rel_path,
+            "plot_count": 0,
+            "total_predictions": 0,
+            "classes": {},
+        }
+        if abs_path.exists():
+            try:
+                with open(abs_path, newline="") as f:
+                    rows = list(_csv_mod.DictReader(f))
+                entry["total_predictions"] = len(rows)
+                entry["plot_count"] = len({r.get("image") for r in rows if r.get("image")})
+                class_counts: dict[str, int] = {}
+                for r in rows:
+                    cls = r.get("class", "")
+                    if cls:
+                        class_counts[cls] = class_counts.get(cls, 0) + 1
+                entry["classes"] = class_counts
+            except Exception:
+                pass
+        results.append(entry)
+
+    return results
+
+
+@router.delete("/pipeline-runs/{id}/inference-results/{label}")
+def delete_inference_result(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    label: str,
+) -> dict[str, Any]:
+    """Delete the inference CSV and remove the entry from run.outputs."""
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+
+    existing_outputs = dict(run.outputs or {})
+    inference_map: dict[str, str] = dict(existing_outputs.get("inference", {}))
+
+    if label not in inference_map:
+        raise HTTPException(status_code=404, detail=f"No inference result for label '{label}'")
+
+    rel_path = inference_map.pop(label)
+    abs_path = paths.abs(rel_path)
+    if abs_path.exists():
+        abs_path.unlink()
+
+    if inference_map:
+        existing_outputs["inference"] = inference_map
+    else:
+        existing_outputs.pop("inference", None)
+        # Also clear inference step completion if no results remain
+        existing_steps = dict(run.steps_completed or {})
+        existing_steps.pop("inference", None)
+        update_pipeline_run(
+            session=session,
+            db_run=run,
+            run_in=PipelineRunUpdate(steps_completed=existing_steps, outputs=existing_outputs),
+        )
+        return {"status": "deleted"}
+
+    update_pipeline_run(
+        session=session,
+        db_run=run,
+        run_in=PipelineRunUpdate(outputs=existing_outputs),
+    )
+    return {"status": "deleted"}
+
+
 # ── Shared: download crops as ZIP ────────────────────────────────────────────
 
 @router.post("/pipeline-runs/{id}/download-crops")
@@ -1866,18 +2060,50 @@ def download_crops(
         version = int((run.outputs or {}).get("stitching_version", 1))
         crop_dir = paths.agrowstitch_dir(version)
 
-    if not crop_dir.exists():
-        raise HTTPException(status_code=404, detail="No crop images found for this run")
-
-    images = sorted(p for p in crop_dir.iterdir()
-                    if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".tif"})
-    if not images:
-        raise HTTPException(status_code=404, detail="No image files found in crop directory")
+    # Check if pre-cropped images exist; if not, crop on-demand from the orthomosaic
+    images_on_disk = (
+        sorted(p for p in crop_dir.iterdir() if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".tif"})
+        if crop_dir.exists()
+        else []
+    )
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for img in images:
-            zf.write(img, img.name)
+        if images_on_disk:
+            for img in images_on_disk:
+                zf.write(img, img.name)
+        elif pipeline and pipeline.type == "aerial":
+            # No pre-cropped images — crop on-demand from the orthomosaic
+            from app.processing.aerial import crop_plots_to_stream
+
+            outputs = run.outputs or {}
+            # Pick the requested ortho version, or the latest available
+            orthos = outputs.get("orthomosaics", [])
+            if ortho_version is not None:
+                ortho_entry = next((o for o in orthos if o["version"] == ortho_version), None)
+            else:
+                ortho_entry = orthos[-1] if orthos else None
+
+            if not ortho_entry:
+                raise HTTPException(status_code=404, detail="No orthomosaic found. Complete the ODM step first.")
+
+            ortho_path = paths.abs(ortho_entry.get("pyramid") or ortho_entry.get("rgb", ""))
+            if not ortho_path.exists():
+                raise HTTPException(status_code=404, detail="Orthomosaic file not found on disk.")
+
+            boundary_path = paths.plot_boundary_geojson
+            if not boundary_path.exists():
+                raise HTTPException(status_code=404, detail="Plot boundaries not found. Complete the Plot Boundaries step first.")
+
+            plot_images = crop_plots_to_stream(ortho_path=ortho_path, boundary_path=boundary_path)
+            if not plot_images:
+                raise HTTPException(status_code=404, detail="No plots could be cropped from the orthomosaic.")
+
+            for filename, data in plot_images:
+                zf.writestr(filename, data)
+        else:
+            raise HTTPException(status_code=404, detail="No crop images found for this run.")
+
     buf.seek(0)
 
     version_suffix = f"_v{ortho_version}" if ortho_version is not None else ""

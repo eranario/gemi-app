@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { useProcess } from "@/contexts/ProcessContext";
 import useCustomToast from "@/hooks/useCustomToast";
 import type { ProcessItem } from "@/types/process";
+import { dataTypes } from "@/config/dataTypes";
 
 interface UploadParams {
   filePaths: string[];
@@ -36,11 +37,14 @@ export function useFileUpload() {
         status: "pending" as const,
       }));
 
+      const abortController = new AbortController();
+
       const processId = addProcess({
         type: "file_upload",
         status: "running",
         title: `Uploading ${filePaths.length} file(s)`,
         items,
+        cancel: () => abortController.abort(),
       });
 
       const token = localStorage.getItem("access_token") || "";
@@ -51,6 +55,7 @@ export function useFileUpload() {
           `${baseUrl}/api/v1/files/copy-local-stream`,
           {
             method: "POST",
+            signal: abortController.signal,
             headers: {
               "Content-Type": "application/json",
               Authorization: `Bearer ${token}`,
@@ -64,8 +69,8 @@ export function useFileUpload() {
               location: formValues.location || null,
               population: formValues.population || null,
               date: formValues.date || null,
-              platform: formValues.platform || null,
-              sensor: formValues.sensor || null,
+              platform: formValues.platform || (dataTypes[dataType as keyof typeof dataTypes] as any)?.defaultPlatform || null,
+              sensor: formValues.sensor || (dataTypes[dataType as keyof typeof dataTypes] as any)?.defaultSensor || null,
             }),
           }
         );
@@ -131,6 +136,25 @@ export function useFileUpload() {
                   });
                   break;
 
+                case "extraction_progress":
+                  if (data.phase === "complete") {
+                    updateProcessItem(processId, String(data.index), {
+                      status: "completed",
+                      label: undefined,
+                    });
+                  } else if (data.phase === "error") {
+                    updateProcessItem(processId, String(data.index), {
+                      status: "error",
+                      error: data.message || "Extraction failed",
+                    });
+                  } else {
+                    updateProcessItem(processId, String(data.index), {
+                      status: "running",
+                      label: data.message || "Extracting…",
+                    });
+                  }
+                  break;
+
                 case "complete":
                   updateProcess(processId, {
                     status: "completed",
@@ -149,12 +173,13 @@ export function useFileUpload() {
         // Stream ended — the "complete" event handler above already
         // marked the process. Nothing else to do here.
       } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        updateProcess(processId, {
-          status: "error",
-          error: errorMsg,
-        });
-        showErrorToastWithCopy(errorMsg);
+        if (err instanceof Error && err.name === "AbortError") {
+          updateProcess(processId, { status: "error", error: "Cancelled", cancel: undefined });
+        } else {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          updateProcess(processId, { status: "error", error: errorMsg });
+          showErrorToastWithCopy(errorMsg);
+        }
       }
     },
     [addProcess, updateProcess, updateProcessItem, showErrorToastWithCopy]

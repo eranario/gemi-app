@@ -93,6 +93,8 @@ export const analyzeApi = {
 
   // Trait record provenance
   listTraitRecords: () => get<TraitRecord[]>("/api/v1/analyze/trait-records"),
+  listTraitRecordsByRun: (runId: string) =>
+    get<TraitRecord[]>(`/api/v1/analyze/trait-records?run_id=${runId}`),
   getTraitRecordGeojson: (id: string) => get<TraitsResponse>(`/api/v1/analyze/trait-records/${id}/geojson`),
   getTraitRecordOrthoInfo: (id: string) => get<OrthoInfoResponse>(`/api/v1/analyze/trait-records/${id}/ortho-info`),
 }

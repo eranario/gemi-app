@@ -105,7 +105,7 @@ const colActions: ColumnDef<FileUploadPublic> = {
 // ── Columns per data type ──────────────────────────────────────────────────────
 
 // Fields that have platform + sensor
-const WITH_PLATFORM_SENSOR = ["Image Data", "Orthomosaic"]
+const WITH_PLATFORM_SENSOR = ["Image Data", "Orthomosaic", "Farm-ng Binary File"]
 // Fields that have platform but not sensor
 const WITH_PLATFORM_ONLY = ["Platform Logs"]
 // Fields that have no date/platform/sensor (population-level data)

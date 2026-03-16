@@ -51,12 +51,15 @@ export function buildColorScale(
   }
 }
 
-function hexToRgba(hex: string, alpha: number): [number, number, number, number] {
-  const h = hex.replace("#", "")
-  const r = parseInt(h.slice(0, 2), 16)
-  const g = parseInt(h.slice(2, 4), 16)
-  const b = parseInt(h.slice(4, 6), 16)
-  return [r, g, b, alpha]
+function hexToRgba(css: string, alpha: number): [number, number, number, number] {
+  // d3 scaleLinear interpolates colors and returns "rgb(r, g, b)" strings
+  const rgb = css.match(/\d+/g)
+  if (rgb && rgb.length >= 3) {
+    return [parseInt(rgb[0]), parseInt(rgb[1]), parseInt(rgb[2]), alpha]
+  }
+  // fallback for plain hex strings
+  const h = css.replace("#", "")
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16), alpha]
 }
 
 /** CSS gradient string for the legend. */

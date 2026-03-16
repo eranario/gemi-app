@@ -49,6 +49,8 @@ export const dataTypes = {
       "RGB",
       "Images",
     ],
+    defaultPlatform: "Amiga",
+    defaultSensor: "RGB",
   },
   Orthomosaic: {
     fields: [

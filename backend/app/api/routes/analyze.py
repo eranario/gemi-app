@@ -240,6 +240,7 @@ def list_trait_records(
     current_user: CurrentUser,
     workspace_id: uuid.UUID | None = None,
     pipeline_id: uuid.UUID | None = None,
+    run_id: uuid.UUID | None = None,
 ) -> list[dict[str, Any]]:
     """
     Return all TraitRecords with workspace / pipeline / run metadata joined in.
@@ -258,6 +259,8 @@ def list_trait_records(
             continue
         pipeline = session.get(Pipeline, run.pipeline_id)
         if not pipeline:
+            continue
+        if run_id and record.run_id != run_id:
             continue
         if workspace_id and pipeline.workspace_id != workspace_id:
             continue
@@ -412,11 +415,75 @@ def get_trait_record_plot_image(
     workspace = session.get(Workspace, pipeline.workspace_id)
     paths = RunPaths.from_db(session=session, run=run, workspace=workspace)
 
-    img_path = paths.cropped_images_dir / f"plot_{plot_id}.png"
+    crop_dir = paths.cropped_images_dir
+    img_path = crop_dir / f"plot_{plot_id}.png"
+
+    # If exact match not found, search for any file whose stem ends with the plot_id
+    # (handles edge cases like "plot_1_1.png" for plot id "1_1")
+    if not img_path.exists() and crop_dir.exists():
+        matches = list(crop_dir.glob(f"*{plot_id}*.png"))
+        if matches:
+            img_path = matches[0]
+
     if not img_path.exists():
-        raise HTTPException(status_code=404, detail=f"Plot image not found: plot_{plot_id}.png")
+        raise HTTPException(status_code=404, detail=f"Plot image not found for plot {plot_id}. Re-run trait extraction to regenerate.")
 
     return FileResponse(str(img_path), media_type="image/png")
+
+
+@router.delete("/trait-records/{record_id}", status_code=200)
+def delete_trait_record(
+    session: SessionDep,
+    current_user: CurrentUser,
+    record_id: uuid.UUID,
+) -> None:
+    from app.models.pipeline import TraitRecord, PipelineRunUpdate
+    from app.crud.pipeline import update_pipeline_run
+
+    record = session.get(TraitRecord, record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Trait record not found")
+
+    run = session.get(PipelineRun, record.run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    pipeline = session.get(Pipeline, run.pipeline_id)
+    workspace = session.get(Workspace, pipeline.workspace_id)
+    paths = RunPaths.from_db(session=session, run=run, workspace=workspace)
+
+    # Delete the GeoJSON file
+    paths.abs(record.geojson_path).unlink(missing_ok=True)
+
+    # Check remaining records before deleting this one
+    remaining = session.exec(
+        select(TraitRecord).where(
+            TraitRecord.run_id == record.run_id,
+            TraitRecord.id != record_id,
+        )
+    ).all()
+
+    session.delete(record)
+
+    # If no records remain, clean up run outputs and mark step incomplete
+    if not remaining:
+        existing_outputs = dict(run.outputs or {})
+        existing_outputs.pop("traits_geojson", None)
+        for key in list(existing_outputs.keys()):
+            if key == "cropped_images" or key.startswith("cropped_images_v"):
+                existing_outputs.pop(key)
+        steps_completed = dict(run.steps_completed or {})
+        steps_completed.pop("trait_extraction", None)
+        update_pipeline_run(
+            session=session,
+            db_run=run,
+            run_in=PipelineRunUpdate(
+                outputs=existing_outputs,
+                steps_completed=steps_completed,
+            ),
+        )
+    else:
+        session.commit()
 
 
 def _extract_plot_id(filename: str) -> str | None:

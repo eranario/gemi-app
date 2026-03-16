@@ -490,9 +490,16 @@ def _calculate_exg_mask(rgb_arr: np.ndarray) -> np.ndarray:
 
 
 def _prop(row: Any, *keys: str) -> Any:
-    """Get the first non-None property value from a GeoDataFrame row by trying multiple keys."""
+    """Get the first non-None property value from a GeoDataFrame row by trying multiple keys.
+
+    Uses row[k] via the index rather than getattr to avoid returning pandas
+    built-in attributes (e.g. row.plot returns the PlotAccessor, not the column value).
+    """
     for k in keys:
-        v = getattr(row, k, None)
+        try:
+            v = row[k] if k in row.index else None
+        except Exception:
+            v = None
         if v is not None and str(v) not in ("nan", "None", ""):
             return v
     return None

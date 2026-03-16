@@ -12,6 +12,8 @@ export interface ProcessItem {
   name: string
   status: ProcessItemStatus
   error?: string
+  /** Custom status label override (e.g. "Extracting…") */
+  label?: string
 }
 
 export interface Process {
@@ -29,4 +31,6 @@ export interface Process {
   message?: string
   /** TanStack Router path to navigate to when the user clicks "View" in the panel */
   link?: string
+  /** Call to abort an in-progress upload */
+  cancel?: () => void
 }

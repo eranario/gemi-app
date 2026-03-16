@@ -10,10 +10,11 @@
  */
 
 import DeckGL from "@deck.gl/react"
+import { WebMercatorViewport } from "@deck.gl/core"
 import { BitmapLayer, GeoJsonLayer } from "@deck.gl/layers"
 import { Map as MapLibre } from "react-map-gl/maplibre"
 import "maplibre-gl/dist/maplibre-gl.css"
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect, useRef } from "react"
 import { X } from "lucide-react"
 import { buildColorScale } from "../utils/colorScale"
 import { ColorLegend } from "./ColorLegend"
@@ -72,6 +73,17 @@ interface PlotImageState {
   y: number
 }
 
+function fitBoundsViewState(
+  bounds: [[number, number], [number, number]],
+  width: number,
+  height: number,
+) {
+  const [[s, w], [n, e]] = bounds
+  const vp = new WebMercatorViewport({ width: Math.max(width, 1), height: Math.max(height, 1) })
+  const { longitude, latitude, zoom } = vp.fitBounds([[w, s], [e, n]], { padding: 40 })
+  return { longitude, latitude, zoom, pitch: 0, bearing: 0 }
+}
+
 export function TraitMap({
   geojson,
   orthoInfo,
@@ -80,8 +92,19 @@ export function TraitMap({
   recordId,
   showPolygons = true,
 }: TraitMapProps) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [viewState, setViewState] = useState({ longitude: 0, latitude: 0, zoom: 2, pitch: 0, bearing: 0 })
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
   const [plotImage, setPlotImage] = useState<PlotImageState | null>(null)
+
+  // Fit view to ortho bounds whenever orthoInfo changes
+  useEffect(() => {
+    if (!orthoInfo?.bounds) return
+    const el = containerRef.current
+    const width = el?.clientWidth ?? 800
+    const height = el?.clientHeight ?? 600
+    setViewState(fitBoundsViewState(orthoInfo.bounds, width, height))
+  }, [orthoInfo])
 
   // Compute color scale from visible features using quantile normalization
   const { colorFn, minVal, maxVal } = useMemo(() => {
@@ -148,7 +171,10 @@ export function TraitMap({
       onClick: (info: any) => {
         if (info.object && recordId) {
           const plotId = String(
-            info.object.properties?.plot_id ?? info.object.properties?.accession ?? "",
+            info.object.properties?.plot_id ??
+            info.object.properties?.plot ??
+            info.object.properties?.accession ??
+            "",
           )
           if (plotId) {
             setPlotImage({ plotId, x: info.x, y: info.y })
@@ -158,27 +184,13 @@ export function TraitMap({
     })
   }, [geojson, colorFn, selectedMetric, filteredIds, showPolygons, recordId])
 
-  // Compute initial view state from ortho bounds or GeoJSON extent
-  const initialViewState = useMemo(() => {
-    if (orthoInfo?.bounds) {
-      const [[s, w], [n, e]] = orthoInfo.bounds
-      return {
-        longitude: (w + e) / 2,
-        latitude: (s + n) / 2,
-        zoom: 15,
-        pitch: 0,
-        bearing: 0,
-      }
-    }
-    return { longitude: 0, latitude: 0, zoom: 2, pitch: 0, bearing: 0 }
-  }, [orthoInfo])
-
   const layers = [bitmapLayer, polygonLayer].filter(Boolean)
 
   return (
-    <div className="relative w-full h-full">
+    <div ref={containerRef} className="relative w-full h-full">
       <DeckGL
-        initialViewState={initialViewState}
+        viewState={viewState}
+        onViewStateChange={({ viewState: vs }: any) => setViewState(vs)}
         controller={{ maxZoom: 24 } as any}
         layers={layers}
         style={{ position: "absolute", inset: "0" }}
@@ -223,9 +235,26 @@ function PlotImagePanel({
   y: number
   onClose: () => void
 }) {
-  const imgUrl = apiUrl(`/api/v1/analyze/trait-records/${recordId}/plot-image/${plotId}`)
+  const [blobUrl, setBlobUrl] = useState<string | null>(null)
+  const [error, setError] = useState(false)
 
-  // Keep panel within the viewport by clamping its position
+  useEffect(() => {
+    setBlobUrl(null)
+    setError(false)
+    const endpoint = apiUrl(`/api/v1/analyze/trait-records/${recordId}/plot-image/${plotId}`)
+    const token = localStorage.getItem("access_token") || ""
+    fetch(endpoint, { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => {
+        if (!res.ok) throw new Error(`${res.status}`)
+        return res.blob()
+      })
+      .then((blob) => setBlobUrl(URL.createObjectURL(blob)))
+      .catch(() => setError(true))
+    return () => {
+      if (blobUrl) URL.revokeObjectURL(blobUrl)
+    }
+  }, [recordId, plotId])
+
   const left = Math.min(x + 12, window.innerWidth - 280)
   const top = Math.max(y - 8, 8)
 
@@ -240,18 +269,15 @@ function PlotImagePanel({
           <X className="w-3.5 h-3.5" />
         </button>
       </div>
-      <img
-        src={imgUrl}
-        alt={`Plot ${plotId}`}
-        className="w-full object-contain max-h-48"
-        onError={(e) => {
-          (e.currentTarget as HTMLImageElement).style.display = "none"
-          const p = document.createElement("p")
-          p.className = "text-xs text-muted-foreground text-center py-4 px-3"
-          p.textContent = "Image not available"
-          e.currentTarget.parentElement?.appendChild(p)
-        }}
-      />
+      {error ? (
+        <p className="text-xs text-muted-foreground text-center py-4 px-3">Image not available</p>
+      ) : !blobUrl ? (
+        <div className="flex items-center justify-center py-6">
+          <div className="w-4 h-4 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
+        </div>
+      ) : (
+        <img src={blobUrl} alt={`Plot ${plotId}`} className="w-full object-contain max-h-48" />
+      )}
     </div>
   )
 }

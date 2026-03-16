@@ -14,18 +14,21 @@ import { PipelinesService, type PipelineRunPublic, type PipelinePublic } from "@
 import { Button } from "@/components/ui/button"
 import { GcpPicker } from "@/features/process/components/GcpPicker"
 import { PlotBoundaryPrep } from "@/features/process/components/PlotBoundaryPrep"
+import { PlotMarker } from "@/features/process/components/PlotMarker"
 import { InferenceTool, type InferenceRunConfig } from "@/features/process/components/InferenceTool"
 import { ProcessingService } from "@/client"
 import { useMutation } from "@tanstack/react-query"
 import useCustomToast from "@/hooks/useCustomToast"
 
 const STEP_LABELS: Record<string, string> = {
+  plot_marking: "Plot Marking",
   gcp_selection: "GCP Selection",
   plot_boundary_prep: "Plot Boundary Prep",
   inference: "Inference",
 }
 
 const STEP_DESCRIPTIONS: Record<string, string> = {
+  plot_marking: "Navigate through raw images and mark the start and end frame for each plot row.",
   gcp_selection: "Select each ground control point in a drone image and mark its pixel location.",
   plot_boundary_prep: "Draw the outer field boundary on the mosaic, then generate a rectangular plot grid from your field design CSV.",
   inference: "Run Roboflow detection or segmentation on plot images and view results.",
@@ -83,9 +86,12 @@ export function RunTool() {
   const description = STEP_DESCRIPTIONS[step] ?? ""
   const isRunning = run?.status === "running" && run.current_step === step
 
+  // Plot marking needs extra width for the 3-column GPS layout
+  const maxWidth = step === "plot_marking" ? "max-w-7xl" : "max-w-5xl"
+
   return (
     <div className="bg-background min-h-screen">
-      <div className="mx-auto max-w-5xl p-8">
+      <div className={`mx-auto ${maxWidth} p-8`}>
         {/* Header */}
         <div className="mb-6 flex items-center gap-4">
           <Button variant="ghost" size="icon" onClick={goBack}>
@@ -100,6 +106,14 @@ export function RunTool() {
         </div>
 
         {/* Tool content */}
+        {step === "plot_marking" && (
+          <PlotMarker
+            runId={runId}
+            onSaved={onSaved}
+            onCancel={goBack}
+          />
+        )}
+
         {step === "gcp_selection" && (
           <GcpPicker
             runId={runId}

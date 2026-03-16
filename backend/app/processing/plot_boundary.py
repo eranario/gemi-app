@@ -296,9 +296,38 @@ def run_associate_boundaries(
             writer.writeheader()
             writer.writerows(associations)
 
+    # Copy labelled plot PNGs to cropped_images/ so the same serve/analyze
+    # endpoints work for ground runs as they do for aerial.
+    # Filename: plot_{Plot}.png  (using the matched boundary "Plot" property,
+    # falling back to the original plot_id from the TIF filename).
+    crops_dir = paths.cropped_images_dir
+    crops_dir.mkdir(parents=True, exist_ok=True)
+    import shutil
+    for assoc in associations:
+        tif_name = assoc.get("plot_tif", "")
+        stem = Path(tif_name).stem  # e.g. "georeferenced_plot_3_utm"
+        # Find matching PNG in stitch_dir
+        png_candidates = list(stitch_dir.glob(f"full_res_mosaic_temp_plot_*{stem.split('_')[-2]}*.png"))
+        if not png_candidates:
+            # Fallback: any PNG whose name contains the plot index
+            plot_idx = stem.replace("georeferenced_plot_", "").replace("_utm", "")
+            png_candidates = list(stitch_dir.glob(f"*{plot_idx}*.png"))
+        if not png_candidates:
+            continue
+        src_png = png_candidates[0]
+        label = assoc.get("Plot") or assoc.get("plot") or stem.replace("georeferenced_plot_", "").replace("_utm", "")
+        dest_png = crops_dir / f"plot_{label}.png"
+        try:
+            shutil.copy2(src_png, dest_png)
+        except Exception as exc:
+            logger.warning("Could not copy %s → %s: %s", src_png.name, dest_png.name, exc)
+
     matched = sum(1 for a in associations if a.get("matched"))
     emit({
         "event": "complete",
         "message": f"Associated {matched}/{len(associations)} plots with boundary polygons",
-        "outputs": {"association": paths.rel(assoc_path)},
+        "outputs": {
+            "association": paths.rel(assoc_path),
+            "cropped_images": paths.rel(crops_dir),
+        },
     })

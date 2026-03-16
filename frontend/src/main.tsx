@@ -13,10 +13,10 @@ import "./index.css"
 import { routeTree } from "./routeTree.gen"
 
 // In production Tauri builds the sidecar injects __GEMI_BACKEND_URL__ before
-// the app loads, so we can use whatever free port was chosen at launch.
-// In dev mode (and when the env var is set) we fall back to VITE_API_URL.
-OpenAPI.BASE =
-  (window as any).__GEMI_BACKEND_URL__ ?? import.meta.env.VITE_API_URL ?? ""
+// the app loads. In dev mode we use "" so all requests use relative URLs and
+// go through the Vite proxy (/api → http://127.0.0.1:8000), which avoids
+// WebKit cross-origin issues with localhost:PORT requests.
+OpenAPI.BASE = (window as any).__GEMI_BACKEND_URL__ ?? ""
 
 const queryClient = new QueryClient()
 

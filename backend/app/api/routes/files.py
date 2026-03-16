@@ -166,6 +166,89 @@ def delete_file(
     return Message(message="File deleted successfully")
 
 
+_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".bmp"}
+
+
+# GET /files/{id}/list-images
+@router.get("/{id}/list-images")
+def list_upload_images(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> Any:
+    """Return a list of image file paths within an upload's storage directory."""
+    file = get_file_upload(session=session, id=id)
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
+    if not current_user.is_superuser and file.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    data_root = get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT
+    storage_dir = Path(data_root) / file.storage_path
+
+    if not storage_dir.exists():
+        return {"images": [], "total": 0, "subfolders": []}
+
+    # Group images by their immediate parent directory name
+    from collections import defaultdict
+    groups: dict[str, list[str]] = defaultdict(list)
+    for p in sorted(storage_dir.rglob("*")):
+        if p.is_file() and p.suffix.lower() in _IMAGE_EXTENSIONS:
+            groups[p.parent.name].append(str(p))
+
+    subfolders = sorted(groups.keys())
+    all_images = [path for folder in subfolders for path in groups[folder]]
+
+    return {
+        "images": all_images,
+        "total": len(all_images),
+        # Only expose subfolders when there are multiple distinct parent dirs
+        "subfolders": subfolders if len(subfolders) > 1 else [],
+        "subfolder_map": {k: v for k, v in groups.items()},
+    }
+
+
+# GET /files/{id}/download-zip
+@router.get("/{id}/download-zip")
+def download_upload_zip(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> Any:
+    """Stream the upload's storage directory as a ZIP file."""
+    import io
+    import zipfile
+    from fastapi.responses import Response
+
+    file = get_file_upload(session=session, id=id)
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
+    if not current_user.is_superuser and file.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    data_root = get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT
+    storage_dir = Path(data_root) / file.storage_path
+
+    if not storage_dir.exists():
+        raise HTTPException(status_code=404, detail="Storage directory not found")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for p in sorted(storage_dir.rglob("*")):
+            if p.is_file():
+                zf.write(p, p.relative_to(storage_dir))
+    buf.seek(0)
+
+    parts = [file.experiment, file.location, file.population, file.date or "", file.data_type.replace(" ", "_")]
+    zip_name = "_".join(p for p in parts if p) + ".zip"
+
+    return Response(
+        content=buf.read(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{zip_name}"'},
+    )
+
+
 # POST /files/sync (reconcile DB with disk)
 @router.post("/sync")
 def sync_files(session: SessionDep, current_user: CurrentUser) -> Any:
@@ -174,7 +257,29 @@ def sync_files(session: SessionDep, current_user: CurrentUser) -> Any:
     return result
 
 
-# POST /files/extract-metadata (read EXIF from a local file)
+import re as _re
+
+_DATE_PATTERNS = [
+    # ISO: 2024-06-15 or 2024_06_15
+    (_re.compile(r"(\d{4})[-_](\d{2})[-_](\d{2})"), "{}-{}-{}"),
+    # Compact: 20240615
+    (_re.compile(r"(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)"), "{}-{}-{}"),
+]
+
+
+def _date_from_name(name: str) -> str | None:
+    """Try to extract a YYYY-MM-DD date from a filename."""
+    for pattern, fmt in _DATE_PATTERNS:
+        m = pattern.search(name)
+        if m:
+            year, month, day = m.group(1), m.group(2), m.group(3)
+            # Sanity-check ranges
+            if 2000 <= int(year) <= 2100 and 1 <= int(month) <= 12 and 1 <= int(day) <= 31:
+                return fmt.format(year, month, day)
+    return None
+
+
+# POST /files/extract-metadata
 @router.post("/extract-metadata")
 def extract_metadata(body: dict[str, str]) -> Any:
     file_path = body.get("file_path", "")
@@ -184,32 +289,30 @@ def extract_metadata(body: dict[str, str]) -> Any:
 
     result: dict[str, str | None] = {"date": None, "platform": None, "sensor": None}
 
+    # 1. Try EXIF (images)
     try:
         from PIL import Image
         from PIL.ExifTags import Base as ExifBase
 
         with Image.open(src) as img:
             exif = img.getexif()
-            if not exif:
-                return result
+            if exif:
+                date_str = exif.get(ExifBase.DateTimeOriginal) or exif.get(ExifBase.DateTime)
+                if date_str and isinstance(date_str, str):
+                    result["date"] = date_str.replace("\x00", "").split(" ")[0].replace(":", "-")
 
-            # Date: DateTimeOriginal (36867) or DateTime (306)
-            date_str = exif.get(ExifBase.DateTimeOriginal) or exif.get(ExifBase.DateTime)
-            if date_str and isinstance(date_str, str):
-                # EXIF format: "2024:06:15 14:30:00" → "2024-06-15"
-                result["date"] = date_str.replace("\x00", "").split(" ")[0].replace(":", "-")
+                make = exif.get(ExifBase.Make)
+                model = exif.get(ExifBase.Model)
+                if make and isinstance(make, str):
+                    result["platform"] = make.replace("\x00", "").strip()
+                if model and isinstance(model, str):
+                    result["sensor"] = model.replace("\x00", "").strip()
+    except Exception:
+        pass
 
-            # Platform / Sensor from Make and Model
-            # EXIF strings can contain null bytes — strip them
-            make = exif.get(ExifBase.Make)
-            model = exif.get(ExifBase.Model)
-            if make and isinstance(make, str):
-                result["platform"] = make.replace("\x00", "").strip()
-            if model and isinstance(model, str):
-                result["sensor"] = model.replace("\x00", "").strip()
-
-    except Exception as exc:
-        logger.warning(f"Could not read EXIF from {file_path}: {exc}")
+    # 2. If no date yet, try parsing it from the filename
+    if not result["date"]:
+        result["date"] = _date_from_name(src.name) or _date_from_name(src.stem)
 
     return result
 
@@ -390,24 +493,25 @@ def _sse_event(data: dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
 
 
-def _trigger_bin_extraction(bin_path: Path, output_dir: Path) -> None:
+def _extract_bin_inline(
+    bin_path: Path, output_dir: Path, idx: int
+) -> Generator[str, None, None]:
     """
-    Launch bin → images extraction in a daemon thread after a .bin file is copied.
-    Progress is emitted to the runner store under a key derived from the file path.
-    The frontend can poll /files/extraction-progress?path=... for SSE updates.
+    Run bin → images extraction in a thread and yield SSE extraction_progress
+    events until it finishes.  Keeps the SSE stream open so the ProcessPanel
+    shows "Extracting…" until the work is actually done.
     """
+    import queue
     import threading
-    import uuid as _uuid
-    from app.processing import runner
     from app.processing.ground import extract_bin_file
 
-    extraction_id = str(_uuid.uuid4())
+    event_q: queue.Queue = queue.Queue()
     stop_event = threading.Event()
 
     def _emit(event: dict) -> None:
-        runner.emit(extraction_id, event)
+        event_q.put(event)
 
-    def worker() -> None:
+    def _worker() -> None:
         try:
             extract_bin_file(
                 bin_path=bin_path,
@@ -415,13 +519,26 @@ def _trigger_bin_extraction(bin_path: Path, output_dir: Path) -> None:
                 stop_event=stop_event,
                 emit=_emit,
             )
+        except Exception as exc:
+            event_q.put({"event": "error", "message": str(exc)})
         finally:
-            runner._mark_done(extraction_id)
+            event_q.put(None)  # sentinel
 
-    runner._init_run(extraction_id)
-    thread = threading.Thread(target=worker, daemon=True)
+    thread = threading.Thread(target=_worker, daemon=True)
     thread.start()
-    logger.info("Started bin extraction thread for %s (id=%s)", bin_path.name, extraction_id)
+    logger.info("Started inline bin extraction for %s", bin_path.name)
+
+    while True:
+        evt = event_q.get()
+        if evt is None:
+            break
+        yield _sse_event({
+            "event": "extraction_progress",
+            "index": idx,
+            "file": bin_path.name,
+            "phase": evt.get("event"),
+            "message": evt.get("message"),
+        })
 
 
 def _copy_local_stream(
@@ -476,18 +593,22 @@ def _copy_local_stream(
                 }
             )
 
-            # Amiga .bin files need extraction after copy
+            # Amiga .bin files need extraction after copy — run inline
+            # so the SSE stream stays open until extraction finishes.
             if src.suffix.lower() == ".bin":
-                yield _sse_event(
-                    {"event": "extracting", "file": name,
-                     "message": f"Extracting {name}…"}
-                )
-                _trigger_bin_extraction(dest_path, dest_dir)
+                yield from _extract_bin_inline(dest_path, dest_dir, idx)
 
         except Exception as exc:
             yield _sse_event(
                 {"event": "error", "file": name, "message": str(exc), "index": idx}
             )
+
+    # Count actual extracted image files (covers .bin extraction output)
+    image_count = sum(
+        1 for p in dest_dir.rglob("*")
+        if p.is_file() and p.suffix.lower() in _IMAGE_EXTENSIONS
+    )
+    final_count = image_count if image_count > 0 else len(uploaded)
 
     # Update the FileUpload record with final status
     db_file = get_file_upload(session=session, id=file_upload_id)
@@ -496,7 +617,7 @@ def _copy_local_stream(
             session=session,
             db_file=db_file,
             file_in=FileUploadUpdate(
-                status="completed", file_count=len(uploaded)
+                status="completed", file_count=final_count
             ),
         )
 

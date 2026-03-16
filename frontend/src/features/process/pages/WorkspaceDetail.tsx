@@ -30,13 +30,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -87,6 +80,21 @@ function NewRunDialog({
   const queryClient = useQueryClient();
   const { showErrorToast } = useCustomToast();
   const [selectedUploadId, setSelectedUploadId] = useState<string>("");
+  const [filters, setFilters] = useState({ experiment: "", location: "", population: "", date: "" });
+  const setFilter = (k: keyof typeof filters, v: string) =>
+    setFilters((prev) => ({ ...prev, [k]: v }));
+
+  const { data: fieldValues } = useQuery({
+    queryKey: ["field-values-run", filters.experiment, filters.location, filters.population],
+    queryFn: () =>
+      FilesService.readFieldValues({
+        experiment: filters.experiment || undefined,
+        location: filters.location || undefined,
+        population: filters.population || undefined,
+      }),
+    enabled: open,
+    staleTime: 30_000,
+  });
 
   const { data: uploadsData, isLoading: uploadsLoading } = useQuery({
     queryKey: ["files"],
@@ -99,11 +107,14 @@ function NewRunDialog({
   const AERIAL_TYPES = new Set(["Image Data", "Orthomosaic"])
   const GROUND_TYPES = new Set(["Farm-ng Binary File", "Image Data"])
 
-  const displayUploads = (uploadsData?.data ?? []).filter((u: FileUploadPublic) =>
-    pipeline.type === "aerial"
-      ? AERIAL_TYPES.has(u.data_type)
-      : GROUND_TYPES.has(u.data_type)
-  );
+  const displayUploads = (uploadsData?.data ?? []).filter((u: FileUploadPublic) => {
+    if (!(pipeline.type === "aerial" ? AERIAL_TYPES.has(u.data_type) : GROUND_TYPES.has(u.data_type))) return false;
+    if (filters.experiment && !u.experiment.toLowerCase().includes(filters.experiment.toLowerCase())) return false;
+    if (filters.location  && !u.location.toLowerCase().includes(filters.location.toLowerCase()))   return false;
+    if (filters.population && !u.population.toLowerCase().includes(filters.population.toLowerCase())) return false;
+    if (filters.date      && !u.date.includes(filters.date))                                       return false;
+    return true;
+  });
 
   const selectedUpload = displayUploads.find(
     (u: FileUploadPublic) => u.id === selectedUploadId
@@ -151,67 +162,101 @@ function NewRunDialog({
     createMutation.mutate(selectedUpload);
   };
 
+  const allUploads = (uploadsData?.data ?? []).filter((u: FileUploadPublic) =>
+    pipeline.type === "aerial" ? AERIAL_TYPES.has(u.data_type) : GROUND_TYPES.has(u.data_type)
+  );
+
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent>
+      <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>New Run - {pipeline.name}</DialogTitle>
+          <DialogTitle>New Run — {pipeline.name}</DialogTitle>
           <DialogDescription>
             Select the uploaded dataset to process.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
-          <div className="space-y-2">
-            <Label>Dataset</Label>
-            {uploadsLoading ? (
-              <div className="text-muted-foreground flex items-center gap-2 text-sm">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading uploads…
-              </div>
-            ) : displayUploads.length === 0 ? (
-              <p className="text-muted-foreground text-sm">
-                No uploaded datasets found. Upload data in the Files tab first.
-              </p>
-            ) : (
-              <Select
-                value={selectedUploadId}
-                onValueChange={setSelectedUploadId}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a dataset…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {displayUploads.map((u: FileUploadPublic) => (
-                    <SelectItem key={u.id} value={u.id}>
-                      {u.experiment} / {u.location} / {u.population} — {u.date}
-                      {u.platform ? ` (${u.platform})` : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-
-          {selectedUpload && (
-            <div className="bg-muted/50 space-y-1 rounded-lg p-3 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Date:</span>
-                <span>{selectedUpload.date}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Platform:</span>
-                <span>{selectedUpload.platform ?? "—"}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Sensor:</span>
-                <span>{selectedUpload.sensor ?? "—"}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Files:</span>
-                <span>{selectedUpload.file_count}</span>
-              </div>
+        <div className="space-y-3 py-1">
+          {uploadsLoading ? (
+            <div className="text-muted-foreground flex items-center gap-2 text-sm py-4">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading uploads…
             </div>
+          ) : allUploads.length === 0 ? (
+            <p className="text-muted-foreground text-sm py-4">
+              No compatible datasets found. Upload data in the Files tab first.
+            </p>
+          ) : (
+            <>
+              {/* Filter row */}
+              <div className="grid grid-cols-4 gap-2">
+                {(["experiment", "location", "population", "date"] as const).map((field) => {
+                  const suggestions: string[] = fieldValues?.[field] ?? []
+                  const listId = suggestions.length ? `filter-${field}` : undefined
+                  return (
+                    <div key={field}>
+                      <input
+                        list={listId}
+                        placeholder={field.charAt(0).toUpperCase() + field.slice(1)}
+                        value={filters[field]}
+                        onChange={(e) => setFilter(field, e.target.value)}
+                        className="border-input bg-background text-foreground placeholder:text-muted-foreground focus:ring-primary h-8 w-full rounded-md border px-3 text-xs focus:border-transparent focus:ring-2 focus:outline-none"
+                      />
+                      {listId && (
+                        <datalist id={listId}>
+                          {suggestions.map((s) => <option key={s} value={s} />)}
+                        </datalist>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Table */}
+              <div className="border rounded-md overflow-hidden">
+                <div className="max-h-64 overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/60 sticky top-0 z-10">
+                      <tr>
+                        {["Experiment", "Location", "Population", "Date", "Platform", "Files"].map((h) => (
+                          <th key={h} className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {displayUploads.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="px-3 py-6 text-center text-muted-foreground text-sm">
+                            No datasets match the filters.
+                          </td>
+                        </tr>
+                      ) : (
+                        displayUploads.map((u: FileUploadPublic) => (
+                          <tr
+                            key={u.id}
+                            onClick={() => setSelectedUploadId(u.id)}
+                            className={`cursor-pointer border-t transition-colors ${
+                              u.id === selectedUploadId
+                                ? "bg-primary/10"
+                                : "hover:bg-muted/50"
+                            }`}
+                          >
+                            <td className="px-3 py-2 font-medium">{u.experiment}</td>
+                            <td className="px-3 py-2 text-muted-foreground">{u.location}</td>
+                            <td className="px-3 py-2 text-muted-foreground">{u.population}</td>
+                            <td className="px-3 py-2 tabular-nums">{u.date}</td>
+                            <td className="px-3 py-2 text-muted-foreground">{u.platform ?? "—"}</td>
+                            <td className="px-3 py-2 tabular-nums text-muted-foreground">{u.file_count}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
           )}
         </div>
 

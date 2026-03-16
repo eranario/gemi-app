@@ -4,13 +4,6 @@ import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -29,6 +22,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { WorkspacesService, type WorkspacePublic } from "@/client"
 import useCustomToast from "@/hooks/useCustomToast"
+
 
 export function WorkspaceDashboard() {
   const navigate = useNavigate()
@@ -158,9 +152,9 @@ export function WorkspaceDashboard() {
         ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {workspaces.map((workspace) => (
-              <Card
+              <div
                 key={workspace.id}
-                className="hover:border-primary/50 cursor-pointer transition-colors"
+                className="relative rounded-lg border bg-card p-4 cursor-pointer transition-all hover:border-primary/60 hover:shadow-md group"
                 onClick={() =>
                   navigate({
                     to: "/process/$workspaceId",
@@ -168,36 +162,38 @@ export function WorkspaceDashboard() {
                   })
                 }
               >
-                <CardHeader>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <CardTitle>{workspace.name}</CardTitle>
-                      <CardDescription>{workspace.description}</CardDescription>
-                    </div>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                        <Button variant="ghost" size="icon" className="flex-shrink-0 h-8 w-8">
-                          <MoreVertical className="w-4 h-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-                        <DropdownMenuItem
-                          className="text-red-600"
-                          onClick={() => setConfirmDelete(workspace)}
-                        >
-                          <Trash2 className="w-4 h-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-muted-foreground text-sm">
-                    Created on: {new Date(workspace.created_at).toLocaleDateString()}
-                  </div>
-                </CardContent>
-              </Card>
+                {/* Top-right menu */}
+                <div className="absolute top-2 right-2">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                      <Button variant="ghost" size="icon" className="h-7 w-7">
+                        <MoreVertical className="w-4 h-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                      <DropdownMenuItem
+                        className="text-red-600"
+                        onClick={() => setConfirmDelete(workspace)}
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+
+                <p className="font-medium text-sm leading-tight truncate pr-8">
+                  {workspace.name}
+                </p>
+                {workspace.description && (
+                  <p className="text-muted-foreground text-xs mt-1 truncate">
+                    {workspace.description}
+                  </p>
+                )}
+                <p className="text-muted-foreground text-[11px] mt-2">
+                  {new Date(workspace.created_at).toLocaleDateString()}
+                </p>
+              </div>
             ))}
           </div>
         )}
