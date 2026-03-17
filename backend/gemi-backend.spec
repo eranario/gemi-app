@@ -30,6 +30,7 @@ hiddenimports = [
     'app.api.routes.workspaces',
     'app.api.routes.pipelines',
     'app.api.routes.processing',
+    'app.api.routes.analyze',
     'app.core.config',
     'app.core.db',
     'app.core.security',
