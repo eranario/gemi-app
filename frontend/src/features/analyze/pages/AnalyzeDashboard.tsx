@@ -521,8 +521,13 @@ function MapTab({ records }: { records: TraitRecord[] }) {
             <CollapsibleWorkspace key={ws} name={ws}>
               {[...pipelineMap.entries()].map(([pipeline, recs]) => (
                 <div key={pipeline}>
-                  <p className="text-muted-foreground px-3 py-0.5 text-xs">
-                    {pipeline}
+                  <p className="text-muted-foreground px-3 py-0.5 text-xs flex items-center gap-1.5">
+                    <span className="truncate">{pipeline}</span>
+                    {recs[0] && (
+                      <Badge variant="secondary" className="flex-shrink-0 text-[10px] px-1 py-0 capitalize leading-tight">
+                        {recs[0].pipeline_type}
+                      </Badge>
+                    )}
                   </p>
                   {recs.map((r) => (
                     <button
@@ -538,11 +543,18 @@ function MapTab({ records }: { records: TraitRecord[] }) {
                       <div className="flex items-center gap-1.5 truncate">
                         <span className="truncate">{r.date}</span>
                         <span className="text-muted-foreground flex-shrink-0 font-mono text-[10px]">v{r.version}</span>
+                        <Badge variant="outline" className="flex-shrink-0 text-[10px] px-1 py-0 capitalize leading-tight">
+                          {r.pipeline_type}
+                        </Badge>
                       </div>
                       <div className="text-muted-foreground mt-0.5 space-y-0.5 text-[11px]">
                         <div className="truncate">
-                          <span className="text-foreground/50">Ortho:</span>{" "}
-                          {versionLabel(r.ortho_version, r.ortho_name)}
+                          <span className="text-foreground/50">
+                            {r.pipeline_type === "ground" ? "Stitch:" : "Ortho:"}
+                          </span>{" "}
+                          {r.pipeline_type === "ground"
+                            ? versionLabel(r.stitch_version, r.stitch_name)
+                            : versionLabel(r.ortho_version, r.ortho_name)}
                         </div>
                         <div className="truncate">
                           <span className="text-foreground/50">Boundary:</span>{" "}
@@ -629,7 +641,13 @@ function MapTab({ records }: { records: TraitRecord[] }) {
             />
             {selectedRecord && (
               <div className="absolute top-2 right-2 z-10 bg-background/80 backdrop-blur-sm border rounded px-2 py-1 text-xs shadow-sm space-y-0.5">
-                <div className="font-medium">{selectedRecord.date} <span className="text-muted-foreground font-mono">v{selectedRecord.version}</span></div>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-medium">{selectedRecord.date}</span>
+                  <span className="text-muted-foreground font-mono">v{selectedRecord.version}</span>
+                  <Badge variant="outline" className="text-[10px] px-1 py-0 capitalize leading-tight">
+                    {selectedRecord.pipeline_type}
+                  </Badge>
+                </div>
                 <div className="text-muted-foreground">{selectedRecord.pipeline_name}</div>
               </div>
             )}

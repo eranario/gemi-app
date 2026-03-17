@@ -17,15 +17,14 @@ jobs:
             target-triple: x86_64-unknown-linux-gnu
             artifact-glob: "frontend/src-tauri/target/release/bundle/deb/*.deb"
             artifact-name: gemi-linux-x86_64
-          # Uncomment when ready to build for other platforms:
-          # - os: macos-latest
-          #   target-triple: aarch64-apple-darwin
-          #   artifact-glob: "frontend/src-tauri/target/release/bundle/dmg/*.dmg"
-          #   artifact-name: gemi-macos-arm64
-          # - os: windows-latest
-          #   target-triple: x86_64-pc-windows-msvc
-          #   artifact-glob: "frontend/src-tauri/target/release/bundle/nsis/*.exe"
-          #   artifact-name: gemi-windows-x86_64
+          - os: macos-latest
+            target-triple: aarch64-apple-darwin
+            artifact-glob: "frontend/src-tauri/target/release/bundle/dmg/*.dmg"
+            artifact-name: gemi-macos-arm64
+          - os: windows-latest
+            target-triple: x86_64-pc-windows-msvc
+            artifact-glob: "frontend/src-tauri/target/release/bundle/nsis/*.exe"
+            artifact-name: gemi-windows-x86_64
 
     runs-on: ${{ matrix.os }}
     name: Build (${{ matrix.target-triple }})
@@ -62,27 +61,65 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Cache the full venv — covers vendor installs (AgRowStitch, LightGlue) that
-      # uv doesn't manage and are expensive to reinstall on every run.
+      # Cache the full venv — keyed on pyproject.toml, uv.lock, AND submodule
+      # commit hashes so any vendor update (AgRowStitch, LightGlue, bin_to_images)
+      # properly invalidates the cache.
+      - name: Get submodule hashes for cache key
+        id: submodule-hashes
+        shell: bash
+        run: |
+          # Collect all submodule HEAD commits into a single string
+          HASHES=$(git submodule foreach --quiet --recursive 'git rev-parse HEAD' | tr '\n' ':')
+          echo "hashes=${HASHES}" >> "$GITHUB_OUTPUT"
+
       - name: Cache Python venv
         uses: actions/cache@v4
         id: venv-cache
         with:
           path: backend/.venv
-          key: venv-${{ matrix.os }}-${{ hashFiles('backend/pyproject.toml', 'backend/uv.lock') }}
+          key: venv-${{ matrix.os }}-${{ hashFiles('backend/pyproject.toml', 'backend/uv.lock') }}-${{ steps.submodule-hashes.outputs.hashes }}
 
-      - name: Install Python dependencies
+      - name: Install Python dependencies (Unix)
+        if: runner.os != 'Windows'
         working-directory: backend
+        shell: bash
         run: |
           uv sync
-          # uv venv doesn't create a pip symlink — add it so build.sh works
-          if [ ! -f .venv/bin/pip ]; then
+          # uv venv doesn't create a pip symlink — add it so scripts work
+          if [ ! -f .venv/bin/pip ] && [ -f .venv/bin/pip3 ]; then
             ln -s .venv/bin/pip3 .venv/bin/pip
           fi
 
-      - name: Install vendor packages (AgRowStitch, LightGlue, bin_to_images)
-        if: steps.venv-cache.outputs.cache-hit != 'true'
+      - name: Install Python dependencies (Windows)
+        if: runner.os == 'Windows'
         working-directory: backend
+        shell: pwsh
+        run: uv sync
+
+      # ── farm-ng-core: macOS needs a source build ──────────────────────────────
+      # On Linux, pre-built PyPI wheels exist. On macOS there are no ARM64 wheels
+      # so we clone v2.3.0, patch out -Werror, and build from source — matching
+      # the approach used in the previous app. Windows is unsupported upstream.
+      - name: Build farm-ng-core from source (macOS)
+        if: runner.os == 'macOS'
+        working-directory: backend
+        shell: bash
+        run: |
+          git clone --depth 1 --branch v2.3.0 https://github.com/farm-ng/farm-ng-core.git /tmp/farm-ng-core
+          cd /tmp/farm-ng-core
+          git submodule update --init --recursive
+          # Remove -Werror so compiler warnings don't fail the build
+          sed -i '' 's/"-Werror",//g' setup.py
+          cd $GITHUB_WORKSPACE/backend
+          .venv/bin/pip install /tmp/farm-ng-core
+
+      # Always install vendor packages so submodule commit changes are picked up
+      # even when the venv cache hits (cache key covers submodule hashes, but run
+      # unconditionally for safety — pip will skip unchanged packages quickly).
+      - name: Install vendor packages — Linux (AgRowStitch, LightGlue, bin_to_images, farm-ng-amiga)
+        if: runner.os == 'Linux'
+        working-directory: backend
+        shell: bash
         run: |
           if [ -d vendor/AgRowStitch ]; then
             .venv/bin/pip install -e vendor/AgRowStitch --no-build-isolation
@@ -93,7 +130,63 @@ jobs:
           if [ -d vendor/bin_to_images ]; then
             .venv/bin/pip install -e vendor/bin_to_images
           fi
-          .venv/bin/pip install farm-ng-amiga || echo "WARNING: farm-ng-amiga install failed"
+          .venv/bin/pip install farm-ng-amiga
+
+      - name: Install vendor packages — macOS (AgRowStitch, LightGlue, bin_to_images, farm-ng-amiga)
+        if: runner.os == 'macOS'
+        working-directory: backend
+        shell: bash
+        run: |
+          if [ -d vendor/AgRowStitch ]; then
+            .venv/bin/pip install -e vendor/AgRowStitch --no-build-isolation
+          fi
+          if [ -d vendor/LightGlue ]; then
+            .venv/bin/pip install vendor/LightGlue
+          fi
+          if [ -d vendor/bin_to_images ]; then
+            .venv/bin/pip install -e vendor/bin_to_images
+          fi
+          # farm-ng-core was already built from source above; install amiga on top
+          .venv/bin/pip install --no-build-isolation farm-ng-amiga
+
+      # farm-ng-core has no Windows wheels — attempt a source build like macOS.
+      # Upstream has never tested Windows so this may fail; continue-on-error
+      # lets the rest of the build proceed. Check the step outcome in CI logs.
+      - name: Build farm-ng-core from source (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch v2.3.0 https://github.com/farm-ng/farm-ng-core.git $env:RUNNER_TEMP\farm-ng-core
+          cd $env:RUNNER_TEMP\farm-ng-core
+          git submodule update --init --recursive
+          # Remove -Werror equivalent for MSVC (/WX) and GCC/Clang (-Werror)
+          (Get-Content setup.py) -replace '"-Werror",', '' -replace '"/WX",', '' | Set-Content setup.py
+          cd $env:GITHUB_WORKSPACE\backend
+          .venv/Scripts/pip.exe install $env:RUNNER_TEMP\farm-ng-core
+
+      - name: Install farm-ng-amiga (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        working-directory: backend
+        shell: pwsh
+        run: |
+          .venv/Scripts/pip.exe install --no-build-isolation farm-ng-amiga
+
+      - name: Install vendor packages — Windows (AgRowStitch, LightGlue, bin_to_images)
+        if: runner.os == 'Windows'
+        working-directory: backend
+        shell: pwsh
+        run: |
+          if (Test-Path vendor/AgRowStitch) {
+            .venv/Scripts/pip.exe install -e vendor/AgRowStitch --no-build-isolation
+          }
+          if (Test-Path vendor/LightGlue) {
+            .venv/Scripts/pip.exe install vendor/LightGlue
+          }
+          if (Test-Path vendor/bin_to_images) {
+            .venv/Scripts/pip.exe install -e vendor/bin_to_images
+          }
 
       # ── Node.js ───────────────────────────────────────────────────────────────
       - name: Set up Node.js
@@ -117,13 +210,26 @@ jobs:
           workspaces: frontend/src-tauri
 
       # ── Build PyInstaller backend sidecar ─────────────────────────────────────
-      - name: Build backend sidecar (PyInstaller)
+      - name: Build backend sidecar — Unix (PyInstaller)
+        if: runner.os != 'Windows'
         working-directory: backend
+        shell: bash
         run: |
           uv run pyinstaller --clean gemi-backend.spec
           mkdir -p ../frontend/src-tauri/binaries
           cp dist/gemi-backend ../frontend/src-tauri/binaries/gemi-backend-${{ matrix.target-triple }}
           echo "Backend binary size: $(du -sh dist/gemi-backend | cut -f1)"
+
+      - name: Build backend sidecar — Windows (PyInstaller)
+        if: runner.os == 'Windows'
+        working-directory: backend
+        shell: pwsh
+        run: |
+          uv run pyinstaller --clean gemi-backend.spec
+          New-Item -ItemType Directory -Force -Path ../frontend/src-tauri/binaries | Out-Null
+          Copy-Item dist/gemi-backend.exe ../frontend/src-tauri/binaries/gemi-backend-${{ matrix.target-triple }}.exe
+          $size = (Get-Item dist/gemi-backend.exe).Length / 1MB
+          Write-Host "Backend binary size: $([math]::Round($size, 1)) MB"
 
       # ── Build Tauri app ───────────────────────────────────────────────────────
       - name: Build Tauri app

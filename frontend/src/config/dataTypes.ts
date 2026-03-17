@@ -32,6 +32,7 @@ export const dataTypes = {
       "Population",
       "Date",
       "Platform",
+      "Sensor",
       "Metadata",
     ],
   },
