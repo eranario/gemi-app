@@ -34,15 +34,15 @@ import useCustomToast from "@/hooks/useCustomToast";
 
 interface RoboflowModel {
   label: string;
-  api_key: string;
-  model_id: string;
+  roboflow_api_key: string;
+  roboflow_model_id: string;
   task_type: "detection" | "segmentation";
 }
 
 const EMPTY_MODEL = (): RoboflowModel => ({
   label: "",
-  api_key: "",
-  model_id: "",
+  roboflow_api_key: "",
+  roboflow_model_id: "",
   task_type: "detection",
 });
 
@@ -110,6 +110,8 @@ export function ProcessingPipeline() {
   const [roboflowModels, setRoboflowModels] = useState<RoboflowModel[]>([
     EMPTY_MODEL(),
   ]);
+  const [inferenceMode, setInferenceMode] = useState<"cloud" | "local">("cloud");
+  const [localServerUrl, setLocalServerUrl] = useState("http://localhost:9001");
 
   // Load existing pipeline when editing
   const { data: existingPipeline } = useQuery<PipelinePublic>({
@@ -143,18 +145,23 @@ export function ProcessingPipeline() {
     const rfModels = cfg.roboflow_models as RoboflowModel[] | null | undefined;
     const rf = cfg.roboflow as Record<string, string> | null | undefined;
     if (rfModels && rfModels.length > 0) {
-      setRoboflowModels(rfModels);
+      // Migrate old api_key/model_id field names if needed
+      setRoboflowModels(rfModels.map((m) => ({
+        label: m.label,
+        roboflow_api_key: m.roboflow_api_key ?? (m as any).api_key ?? "",
+        roboflow_model_id: m.roboflow_model_id ?? (m as any).model_id ?? "",
+        task_type: m.task_type,
+      })));
     } else if (rf?.api_key) {
-      setRoboflowModels([
-        {
-          label: "Default",
-          api_key: rf.api_key ?? "",
-          model_id: rf.model_id ?? "",
-          task_type:
-            (rf.task_type as "detection" | "segmentation") ?? "detection",
-        },
-      ]);
+      setRoboflowModels([{
+        label: "Default",
+        roboflow_api_key: rf.api_key ?? "",
+        roboflow_model_id: rf.model_id ?? "",
+        task_type: (rf.task_type as "detection" | "segmentation") ?? "detection",
+      }]);
     }
+    setInferenceMode((cfg.inference_mode as "cloud" | "local") ?? "cloud");
+    setLocalServerUrl((cfg.local_server_url as string) ?? "http://localhost:9001");
   }, [existingPipeline]);
 
   const steps = [
@@ -183,7 +190,9 @@ export function ProcessingPipeline() {
 
   const configPayload = () => ({
     ...(pipelineType === "ground" ? groundConfig : aerialConfig),
-    roboflow_models: roboflowModels.filter((m) => m.model_id.trim()),
+    roboflow_models: roboflowModels.filter((m) => m.roboflow_model_id.trim()),
+    inference_mode: inferenceMode,
+    ...(inferenceMode === "local" && { local_server_url: localServerUrl }),
   });
 
   const saveMutation = useMutation({
@@ -620,22 +629,22 @@ export function ProcessingPipeline() {
                       <Input
                         type="password"
                         placeholder="rf_xxxxxxxxxxxx"
-                        value={model.api_key}
+                        value={model.roboflow_api_key}
                         onChange={(e) =>
                           setRoboflowModels((prev) =>
                             prev.map((m, i) =>
-                              i === idx ? { ...m, api_key: e.target.value } : m
+                              i === idx ? { ...m, roboflow_api_key: e.target.value } : m
                             )
                           )
                         }
                       />
                       <Input
                         placeholder="my-project/3"
-                        value={model.model_id}
+                        value={model.roboflow_model_id}
                         onChange={(e) =>
                           setRoboflowModels((prev) =>
                             prev.map((m, i) =>
-                              i === idx ? { ...m, model_id: e.target.value } : m
+                              i === idx ? { ...m, roboflow_model_id: e.target.value } : m
                             )
                           )
                         }
@@ -687,6 +696,47 @@ export function ProcessingPipeline() {
                   </Button>
                 </div>
 
+                {/* Inference mode */}
+                <div className="space-y-2">
+                  <Label>Inference Mode</Label>
+                  <div className="flex items-center gap-4">
+                    <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                      <input
+                        type="radio"
+                        value="cloud"
+                        checked={inferenceMode === "cloud"}
+                        onChange={() => setInferenceMode("cloud")}
+                        className="accent-primary"
+                      />
+                      Cloud (Roboflow)
+                    </label>
+                    <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                      <input
+                        type="radio"
+                        value="local"
+                        checked={inferenceMode === "local"}
+                        onChange={() => setInferenceMode("local")}
+                        className="accent-primary"
+                      />
+                      Local server
+                    </label>
+                  </div>
+                  {inferenceMode === "local" && (
+                    <div className="space-y-1 pt-1">
+                      <Label className="text-xs">Server URL</Label>
+                      <Input
+                        className="h-8 text-sm font-mono"
+                        value={localServerUrl}
+                        onChange={(e) => setLocalServerUrl(e.target.value)}
+                        placeholder="http://localhost:9001"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        The server will be auto-started if not already running.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
                 {/* Summary */}
                 <div className="bg-muted/50 space-y-2 rounded-lg p-4">
                   <h4 className="text-sm font-medium">Pipeline Summary</h4>
@@ -725,13 +775,18 @@ export function ProcessingPipeline() {
                         Roboflow models:
                       </span>
                       <span className="font-medium">
-                        {roboflowModels.filter((m) => m.model_id.trim())
-                          .length > 0
+                        {roboflowModels.filter((m) => m.roboflow_model_id.trim()).length > 0
                           ? roboflowModels
-                              .filter((m) => m.model_id.trim())
-                              .map((m) => m.label || m.model_id)
+                              .filter((m) => m.roboflow_model_id.trim())
+                              .map((m) => m.label || m.roboflow_model_id)
                               .join(", ")
                           : "—"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Inference mode:</span>
+                      <span className="font-medium capitalize">
+                        {inferenceMode === "local" ? `Local (${localServerUrl})` : "Cloud"}
                       </span>
                     </div>
                   </div>

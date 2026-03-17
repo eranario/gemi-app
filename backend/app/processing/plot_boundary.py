@@ -184,6 +184,8 @@ def run_associate_boundaries(
     run_id: Any,
     stop_event: Any,
     emit: Any,
+    stitch_version: int | None = None,
+    boundary_version: int | None = None,
 ) -> None:
     """
     Compute step (ground only).
@@ -191,29 +193,49 @@ def run_associate_boundaries(
     For each georeferenced plot TIF produced by AgRowStitch, compute its
     WGS84 centre point and find which plot polygon in Plot-Boundary-WGS84.geojson
     it falls inside.  Writes:
-      - Intermediate/.../association.csv  (plot_tif → plot_id, row, col, accession, …)
-      - Updates plot_borders.csv with labels from matched polygon properties.
+      - Intermediate/.../association_v{N}.csv  (plot_tif → plot_id, row, col, accession, …)
+    Stores a versioned entry in run.outputs["associations"].
     """
     from app.crud.pipeline import get_pipeline_run, get_pipeline
     from app.core.paths import RunPaths
     from app.models.workspace import Workspace
     from app.models.pipeline import PipelineRunUpdate
     from app.crud.pipeline import update_pipeline_run
+    from datetime import datetime, timezone
 
     run = get_pipeline_run(session=session, id=run_id)
     pipeline = get_pipeline(session=session, id=run.pipeline_id)
     workspace = session.get(Workspace, pipeline.workspace_id)
     paths = RunPaths.from_db(session=session, run=run, workspace=workspace)
+    outputs = dict(run.outputs or {})
+
+    # Resolve stitch version to use
+    resolved_stitch_version = stitch_version or int(outputs.get("stitching_version", 1))
+
+    # Resolve boundary GeoJSON path
+    if boundary_version is not None:
+        plot_boundaries = outputs.get("plot_boundaries", [])
+        bv_entry = next((b for b in plot_boundaries if b["version"] == boundary_version), None)
+        if bv_entry:
+            boundary_path = paths.abs(bv_entry["geojson_path"])
+        else:
+            boundary_path = paths.plot_boundary_geojson_versioned(boundary_version)
+    else:
+        boundary_path = paths.plot_boundary_geojson
+        # Infer boundary_version from the canonical path entry
+        plot_boundaries = outputs.get("plot_boundaries", [])
+        if plot_boundaries:
+            boundary_version = plot_boundaries[0]["version"]  # fallback: first entry
 
     emit({"event": "progress", "message": "Loading plot boundaries…"})
 
-    if not paths.plot_boundary_geojson.exists():
+    if not boundary_path.exists():
         raise FileNotFoundError(
-            "Plot-Boundary-WGS84.geojson not found. "
+            f"Plot boundary GeoJSON not found: {boundary_path}. "
             "Complete the Plot Boundary Prep step first."
         )
 
-    with open(paths.plot_boundary_geojson) as f:
+    with open(boundary_path) as f:
         boundary_fc = json.load(f)
 
     boundary_polys = []
@@ -229,8 +251,7 @@ def run_associate_boundaries(
         raise ValueError("No valid boundary polygons found in Plot-Boundary-WGS84.geojson")
 
     # Find georeferenced plot TIFs from stitching output
-    stitch_version = int((run.outputs or {}).get("stitching_version", 1))
-    stitch_dir = paths.agrowstitch_dir(stitch_version)
+    stitch_dir = paths.agrowstitch_dir(resolved_stitch_version)
 
     if not stitch_dir.exists():
         raise FileNotFoundError(f"AgRowStitch output not found: {stitch_dir}")
@@ -287,8 +308,13 @@ def run_associate_boundaries(
             **matched_props,
         })
 
-    # Write association CSV
-    assoc_path = paths.intermediate_run / "association.csv"
+    # Determine version number for this association run
+    existing_associations = list(outputs.get("associations", []))
+    new_version = max((a["version"] for a in existing_associations), default=0) + 1
+
+    # Write versioned association CSV
+    assoc_path = paths.intermediate_run / f"association_v{new_version}.csv"
+    assoc_path.parent.mkdir(parents=True, exist_ok=True)
     if associations:
         fieldnames = list(dict.fromkeys(k for row in associations for k in row))
         with open(assoc_path, "w", newline="") as f:
@@ -323,11 +349,28 @@ def run_associate_boundaries(
             logger.warning("Could not copy %s → %s: %s", src_png.name, dest_png.name, exc)
 
     matched = sum(1 for a in associations if a.get("matched"))
+    now = datetime.now(timezone.utc).isoformat()
+    assoc_entry = {
+        "version": new_version,
+        "stitch_version": resolved_stitch_version,
+        "boundary_version": boundary_version,
+        "association_path": paths.rel(assoc_path),
+        "matched": matched,
+        "total": len(associations),
+        "created_at": now,
+    }
+    existing_associations.append(assoc_entry)
+    outputs["associations"] = existing_associations
+    outputs["active_association_version"] = new_version
+    outputs["cropped_images"] = paths.rel(crops_dir)
+    update_pipeline_run(
+        session=session,
+        db_run=run,
+        run_in=PipelineRunUpdate(outputs=outputs),
+    )
+
     emit({
         "event": "complete",
         "message": f"Associated {matched}/{len(associations)} plots with boundary polygons",
-        "outputs": {
-            "association": paths.rel(assoc_path),
-            "cropped_images": paths.rel(crops_dir),
-        },
+        "outputs": {},
     })

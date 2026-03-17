@@ -201,7 +201,7 @@ def save_plot_marking(
     GPS coordinates are looked up from msgs_synced.csv for each start/end image.
     """
     paths = _get_paths(session, run_id)
-    paths.intermediate_pipeline.mkdir(parents=True, exist_ok=True)
+    paths.intermediate_year.mkdir(parents=True, exist_ok=True)
 
     # Build GPS index from msgs_synced.csv so we can fill in lat/lon
     gps_index: dict[str, tuple[float, float]] = {}
@@ -365,8 +365,8 @@ def run_stitching(
             )
             break
 
-    # Allow per-pipeline overrides stored in the intermediate directory
-    pipeline_config_path = paths.intermediate_pipeline / "agrowstitch_config.yaml"
+    # Allow per-pipeline overrides stored in the intermediate directory (year-scoped)
+    pipeline_config_path = paths.intermediate_year / "agrowstitch_config.yaml"
     if pipeline_config_path.exists():
         with open(pipeline_config_path) as f:
             base_config.update(yaml.safe_load(f) or {})
@@ -963,6 +963,12 @@ def run_georeferencing(
     outputs: dict = {"georeferencing": paths.rel(out_dir)}
     if geojson_path:
         outputs["plot_boundaries_geojson"] = paths.rel(geojson_path)
+        # Copy to canonical location and auto-complete plot_boundary_prep so the
+        # user can open the tool to review/adjust without having to redo it.
+        import shutil as _shutil
+        _shutil.copy2(str(geojson_path), str(paths.plot_boundary_geojson))
+        outputs["plot_boundary_prep"] = paths.rel(paths.plot_boundary_geojson)
+        outputs["_mark_steps_complete"] = ["plot_boundary_prep"]
     return outputs
 
 
@@ -976,6 +982,10 @@ def run_inference(
     stop_event: threading.Event,
     emit: Callable[[dict], None],
     models: list[dict],
+    stitch_version: int | None = None,
+    association_version: int | None = None,
+    inference_mode: str = "cloud",
+    local_server_url: str | None = None,
 ) -> dict[str, Any]:
     """
     Run Roboflow inference on stitched plot images using one or more model configs.
@@ -985,13 +995,16 @@ def run_inference(
         ...
     ]
 
-    Reads:
-      - Processed/{workspace}/{pop}/{run_seg}/AgRowStitch_v{N}/*.png
+    stitch_version: which AgRowStitch version's images to run inference on.
+    association_version: which association version maps plot indices to plot metadata.
+                         Stored as metadata so downstream trait joining uses the right CSV.
 
-    Writes one CSV per model:
-      - roboflow_predictions_{label}.csv
+    Each completed model run is appended as an entry in run.outputs["inference"] (list format).
     """
-    from app.processing.inference_utils import run_inference_on_image
+    from app.processing.inference_utils import run_inference_on_image, merge_inference_into_geojson
+    from app.crud.pipeline import update_pipeline_run
+    from app.models.pipeline import PipelineRunUpdate
+    from datetime import datetime, timezone
 
     if not models:
         raise ValueError("No inference models provided.")
@@ -1000,22 +1013,84 @@ def run_inference(
 
     paths = _get_paths(session, run_id)
     run = session.get(PipelineRun, run_id)
-    agrowstitch_version = int((run.outputs or {}).get("stitching_version") or 1)
-    out_dir = paths.agrowstitch_dir(agrowstitch_version)
+    outputs = dict(run.outputs or {})
+
+    # Resolve which stitch version to use
+    resolved_stitch_version = stitch_version or int(outputs.get("stitching_version") or 1)
+    out_dir = paths.agrowstitch_dir(resolved_stitch_version)
 
     if not out_dir.exists():
         raise FileNotFoundError(
-            f"Stitching output not found at {out_dir}. Complete Stitching first."
+            f"Stitching v{resolved_stitch_version} output not found. Complete Stitching first."
         )
 
     plot_images = sorted(out_dir.glob("full_res_mosaic_temp_plot_*.png"))
     if not plot_images:
         plot_images = sorted(out_dir.glob("AgRowStitch_plot-id-*.png"))
     if not plot_images:
-        raise FileNotFoundError(f"No plot images found in {out_dir}.")
+        raise FileNotFoundError(f"No plot images found in stitching v{resolved_stitch_version} output.")
 
-    fieldnames = ["image", "class", "confidence", "x", "y", "width", "height"]
-    inference_paths: dict[str, str] = {}
+    # Resolve which association version to use
+    resolved_assoc_version = association_version
+    if resolved_assoc_version is None:
+        existing_assocs = outputs.get("associations", [])
+        active_assoc_v = outputs.get("active_association_version")
+        if active_assoc_v is not None:
+            resolved_assoc_version = int(active_assoc_v)
+        elif existing_assocs:
+            resolved_assoc_version = existing_assocs[-1]["version"]
+
+    # Load association CSV → build {plot_idx: row} lookup for metadata enrichment
+    assoc_by_idx: dict[str, dict] = {}
+    assoc_entry = None
+    if resolved_assoc_version is not None:
+        assoc_entry = next(
+            (a for a in outputs.get("associations", []) if a["version"] == resolved_assoc_version),
+            None,
+        )
+    if assoc_entry and assoc_entry.get("association_path"):
+        assoc_csv_path = paths.abs(assoc_entry["association_path"])
+    else:
+        assoc_csv_path = paths.intermediate_run / "association.csv"
+    if assoc_csv_path.exists():
+        with open(assoc_csv_path, newline="") as _f:
+            for _row in csv.DictReader(_f):
+                tif_name = _row.get("plot_tif", "")
+                stem = Path(tif_name).stem  # "georeferenced_plot_3_utm"
+                parts = stem.split("_")
+                plot_idx = None
+                for _i, _p in enumerate(parts):
+                    if _p == "plot" and _i + 1 < len(parts) and parts[_i + 1].isdigit():
+                        plot_idx = parts[_i + 1]
+                        break
+                if plot_idx is not None:
+                    assoc_by_idx[plot_idx] = _row
+        logger.info("Loaded association CSV: %d plot entries from %s", len(assoc_by_idx), assoc_csv_path.name)
+
+    def _get_plot_idx(img_path: Path) -> str:
+        """Extract plot index from full_res_mosaic_temp_plot_{N}.png"""
+        stem = img_path.stem
+        parts = stem.split("_")
+        for _i, _p in enumerate(parts):
+            if _p == "plot" and _i + 1 < len(parts) and parts[_i + 1].isdigit():
+                return parts[_i + 1]
+        return stem
+
+    fieldnames = ["image", "plot_index", "plot_label", "accession", "row", "col", "model_id",
+                  "class", "confidence", "x", "y", "width", "height", "points"]
+
+    # Read existing inference list (new list format); migrate old dict format if needed
+    existing_inference = outputs.get("inference", [])
+    if isinstance(existing_inference, dict):
+        # Migrate legacy {label: path} → list
+        existing_inference = [
+            {"label": lbl, "csv_path": rel, "stitch_version": None, "association_version": None, "created_at": None}
+            for lbl, rel in existing_inference.items()
+        ]
+
+    new_entries: list[dict] = []
+    global_total = len(models) * len(plot_images)
+    global_done = 0
 
     for model in models:
         if stop_event.is_set():
@@ -1025,13 +1100,17 @@ def run_inference(
         model_id = model.get("roboflow_model_id", "")
         task_type = model.get("task_type", "detection")
 
-        emit(
-            {
-                "event": "progress",
-                "message": f"[{label}] Running on {len(plot_images)} plots…",
-                "total": len(plot_images),
-            }
-        )
+        mode_tag = "local" if inference_mode == "local" else "cloud"
+        masked_key = (api_key[:4] + "…" + api_key[-4:]) if len(api_key) > 8 else "***"
+        emit({
+            "event": "log",
+            "message": (
+                f"[{label}] Starting {mode_tag} inference on {len(plot_images)} plots "
+                f"(stitch v{resolved_stitch_version}) — model: {model_id}, key: {masked_key}"
+            ),
+            "total": global_total,
+            "done": global_done,
+        })
 
         safe_label = "".join(c if c.isalnum() or c in "-_" else "_" for c in label)
         predictions_path = out_dir / f"roboflow_predictions_{safe_label}.csv"
@@ -1039,13 +1118,44 @@ def run_inference(
 
         for i, img in enumerate(plot_images):
             if stop_event.is_set():
+                emit({"event": "log", "message": f"[{label}] Stopped after {i}/{len(plot_images)} plots."})
                 return {}
-            emit({"event": "progress", "index": i, "message": f"[{label}] {img.name}"})
+
+            def _warn(msg: str, _lbl: str = label) -> None:
+                emit({"event": "log", "message": f"  ⚠ [{_lbl}] {msg}"})
+
             preds = run_inference_on_image(
-                img, api_key=api_key, model_id=model_id, task_type=task_type
+                img, api_key=api_key, model_id=model_id, task_type=task_type,
+                inference_mode=inference_mode,
+                local_server_url=local_server_url or "",
+                on_warning=_warn,
             )
+            global_done += 1
+            det_label = f"{len(preds)} detection{'s' if len(preds) != 1 else ''}" if preds else "no detections"
+            pct = round(global_done / global_total * 100)
+            emit({"event": "progress", "progress": pct})
+            emit({
+                "event": "log",
+                "message": f"[{label}] ({i + 1}/{len(plot_images)}) {img.name} → {det_label}",
+                "total": global_total,
+                "done": global_done,
+            })
+            plot_idx = _get_plot_idx(img)
+            assoc = assoc_by_idx.get(plot_idx, {})
+            plot_label = assoc.get("plot") or assoc.get("Plot") or plot_idx
+            accession = assoc.get("accession") or assoc.get("Accession") or ""
+            row_val = assoc.get("row") or assoc.get("Row") or ""
+            col_val = assoc.get("column") or assoc.get("col") or assoc.get("Col") or ""
+            import json as _json
             for p in preds:
                 p["image"] = img.name
+                p["plot_index"] = plot_idx
+                p["plot_label"] = plot_label
+                p["accession"] = accession
+                p["row"] = row_val
+                p["col"] = col_val
+                p["model_id"] = model_id
+                p["points"] = _json.dumps(p["points"]) if p.get("points") else ""
             all_rows.extend(preds)
 
         with open(predictions_path, "w", newline="") as f:
@@ -1053,15 +1163,87 @@ def run_inference(
             writer.writeheader()
             writer.writerows(all_rows)
 
-        inference_paths[label] = paths.rel(predictions_path)
-        logger.info(
-            "[%s] Wrote %d predictions → %s",
-            label,
-            len(all_rows),
-            predictions_path.name,
-        )
+        # Class breakdown summary
+        class_counts: dict[str, int] = {}
+        for r in all_rows:
+            cls = r.get("class", "?")
+            class_counts[cls] = class_counts.get(cls, 0) + 1
+        if class_counts:
+            breakdown = ", ".join(f"{cls}: {n}" for cls, n in sorted(class_counts.items()))
+            summary = f"[{label}] Done — {len(all_rows)} detections across {len(plot_images)} plots ({breakdown})"
+        else:
+            summary = f"[{label}] Done — 0 detections across {len(plot_images)} plots. Check model ID, API key, and confidence threshold."
+        emit({"event": "log", "message": summary})
+        logger.info("[%s] Wrote %d predictions → %s", label, len(all_rows), predictions_path.name)
 
-    return {"inference": inference_paths}
+        # Merge detection counts into Traits GeoJSON if a plot boundary exists
+        traits_path = paths.traits_geojson
+        boundary_path = paths.plot_boundary_geojson
+        if boundary_path.exists() and not traits_path.exists():
+            import shutil as _shutil
+            traits_path.parent.mkdir(parents=True, exist_ok=True)
+            _shutil.copy2(boundary_path, traits_path)
+            logger.info("Copied plot boundary → %s for inference trait merge", traits_path.name)
+        if traits_path.exists():
+            merge_inference_into_geojson(
+                traits_path, all_rows, model_label=label,
+                plot_id_field="plot_label", feature_match_prop="Plot",
+            )
+
+        new_entries.append({
+            "label": label,
+            "csv_path": paths.rel(predictions_path),
+            "stitch_version": resolved_stitch_version,
+            "association_version": resolved_assoc_version,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    if new_entries:
+        # Replace any existing entries with the same label (re-run overwrites)
+        new_labels = {e["label"] for e in new_entries}
+        existing_inference = [e for e in existing_inference if e.get("label") not in new_labels]
+        existing_inference.extend(new_entries)
+        outputs["inference"] = existing_inference
+        run = session.get(PipelineRun, run_id)
+        update_pipeline_run(session=session, db_run=run, run_in=PipelineRunUpdate(outputs=outputs))
+
+        # Create a TraitRecord so the Analyze tab can display this run
+        traits_path = paths.traits_geojson
+        if traits_path.exists():
+            from app.models.pipeline import TraitRecord as _TraitRecord
+            from sqlmodel import select as _select, func as _func
+            import json as _json2
+
+            with open(traits_path) as _gj_f:
+                _gj = _json2.load(_gj_f)
+            _features = _gj.get("features", [])
+            _trait_cols: list[str] = sorted({
+                k
+                for f in _features
+                for k, v in (f.get("properties") or {}).items()
+                if isinstance(v, (int, float)) and v is not True and v is not False
+            })
+            _boundary_v = int(outputs.get("active_plot_boundary_version") or 0) or None
+            _max_v = session.exec(
+                _select(_func.max(_TraitRecord.version)).where(_TraitRecord.run_id == run_id)
+            ).one() or 0
+            _tr = _TraitRecord(
+                run_id=run_id,
+                geojson_path=paths.rel(traits_path),
+                ortho_version=None,
+                boundary_version=_boundary_v,
+                version=_max_v + 1,
+                plot_count=len(_features),
+                trait_columns=_trait_cols,
+                vf_avg=None,
+                height_avg=None,
+            )
+            session.add(_tr)
+            session.commit()
+            logger.info("Created TraitRecord v%d for ground run %s (%d plots, %d trait columns)",
+                        _max_v + 1, run_id, len(_features), len(_trait_cols))
+
+    return {}
 
 
 # ── Binary extraction (.bin → images) ────────────────────────────────────────

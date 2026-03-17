@@ -1,10 +1,12 @@
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query"
 import {
   type ColumnFiltersState,
+  type SortingState,
   getCoreRowModel,
   getFacetedRowModel,
   getFilteredRowModel,
   getPaginationRowModel,
+  getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table"
 import { RefreshCw, Search, X } from "lucide-react"
@@ -41,6 +43,7 @@ function ManageDataTableContent({ selectedDataType }: { selectedDataType: string
   const { data: files } = useSuspenseQuery(getFilesQueryOptions())
   const [globalFilter, setGlobalFilter] = useState("")
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
+  const [sorting, setSorting] = useState<SortingState>([{ id: "date", desc: true }])
 
   const columns = useMemo(() => getColumnsForDataType(selectedDataType), [selectedDataType])
 
@@ -52,13 +55,15 @@ function ManageDataTableContent({ selectedDataType }: { selectedDataType: string
   const table = useReactTable<FileUploadPublic>({
     data: filteredData,
     columns,
-    state: { globalFilter, columnFilters },
+    state: { globalFilter, columnFilters, sorting },
     onGlobalFilterChange: setGlobalFilter,
     onColumnFiltersChange: setColumnFilters,
+    onSortingChange: setSorting,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getFacetedRowModel: getFacetedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
+    getSortedRowModel: getSortedRowModel(),
   })
 
   const hasActiveFilters = globalFilter !== "" || columnFilters.length > 0

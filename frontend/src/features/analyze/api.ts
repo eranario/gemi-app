@@ -74,14 +74,16 @@ export interface TraitRecord {
   ortho_version: number | null
   /** User-given name for that ortho version, if any */
   ortho_name: string | null
+  /** Stitch version number used (ground only) */
+  stitch_version: number | null
+  /** User-given name for that stitch version, if any */
+  stitch_name: string | null
   /** Boundary version number used (null = canonical file) */
   boundary_version: number | null
   /** User-given name for that boundary version, if any */
   boundary_name: string | null
   plot_count: number
   trait_columns: string[]
-  vf_avg: number | null
-  height_avg: number | null
   created_at: string
 }
 

@@ -433,7 +433,7 @@ def save_plot_boundaries(
     If version is given, saves as Plot-Boundary-WGS84_v{N}.geojson.
     """
     paths = _get_paths(session, run_id)
-    paths.intermediate_pipeline.mkdir(parents=True, exist_ok=True)
+    paths.intermediate_year.mkdir(parents=True, exist_ok=True)
 
     if version is not None:
         target = paths.plot_boundary_geojson_versioned(version)
@@ -573,7 +573,17 @@ def run_trait_extraction(
             "Complete the Plot Boundaries step first."
         )
 
+    # Compute this TraitRecord's version number early (needed for versioned crop dir)
+    from app.models.pipeline import TraitRecord as _TraitRecord_early
+    from sqlmodel import func as _func_early, select as _sel_early
+    _max_v_early = session.exec(
+        _sel_early(_func_early.max(_TraitRecord_early.version)).where(_TraitRecord_early.run_id == run_id)
+    ).first()
+    _next_version_early = (_max_v_early or 0) + 1
+
     paths.cropped_images_dir.mkdir(parents=True, exist_ok=True)
+    _versioned_crops_dir = paths.cropped_images_versioned(_next_version_early)
+    _versioned_crops_dir.mkdir(parents=True, exist_ok=True)
 
     # Load boundary GeoJSON
     gdf = gpd.read_file(_boundary_path)
@@ -652,10 +662,11 @@ def run_trait_extraction(
                 tier = _prop(orig_row, "Tier", "tier", "row")
                 label = _prop(orig_row, "Label", "label", "accession", "Accession")
 
-                # Save cropped image
+                # Save cropped image to both canonical dir (backward compat) and versioned dir
                 bgr = cv2.cvtColor(rgb_arr, cv2.COLOR_RGB2BGR)
                 crop_path = paths.cropped_images_dir / f"plot_{plot_id}.png"
                 cv2.imwrite(str(crop_path), bgr)
+                cv2.imwrite(str(_versioned_crops_dir / f"plot_{plot_id}.png"), bgr)
 
                 record: dict[str, Any] = {
                     "plot_id": plot_id,
@@ -716,14 +727,10 @@ def run_trait_extraction(
 
     # ── Create provenance record ──────────────────────────────────────────
     from app.models.pipeline import TraitRecord as _TraitRecord
-    from sqlmodel import func as _func, select as _sel
-    _max_v = session.exec(
-        _sel(_func.max(_TraitRecord.version)).where(_TraitRecord.run_id == run_id)
-    ).first()
-    _next_version = (_max_v or 0) + 1
+    # Use the pre-computed version (_next_version_early) — consistent with versioned crop dir
     _trait_record = _TraitRecord(
         run_id=run_id,
-        version=_next_version,
+        version=_next_version_early,
         geojson_path=paths.rel(paths.traits_geojson),
         ortho_version=_resolved_ortho_v,
         ortho_name=_resolved_ortho_name,
@@ -736,17 +743,13 @@ def run_trait_extraction(
     )
     session.add(_trait_record)
     session.commit()
-    logger.info("Created TraitRecord %s (%d plots, ortho v%s)", _trait_record.id, len(records), _resolved_ortho_v)
+    logger.info("Created TraitRecord v%d (%d plots, ortho v%s)", _next_version_early, len(records), _resolved_ortho_v)
 
-    result: dict[str, Any] = {
+    return {
         "traits": paths.rel(paths.traits_geojson),
         "cropped_images": paths.rel(paths.cropped_images_dir),
+        f"cropped_images_v{_next_version_early}": paths.rel(_versioned_crops_dir),
     }
-    # Also key crops by the ortho version used so the UI can link them
-    active_v = (_run.outputs or {}).get("active_ortho_version") if _run else None
-    if active_v is not None:
-        result[f"cropped_images_v{active_v}"] = paths.rel(paths.cropped_images_dir)
-    return result
 
 
 # ── On-demand plot cropping ────────────────────────────────────────────────────
@@ -811,38 +814,108 @@ def run_inference(
     stop_event: threading.Event,
     emit: Callable[[dict], None],
     models: list[dict],
+    trait_version: int | None = None,
+    inference_mode: str = "cloud",
+    local_server_url: str | None = None,
 ) -> dict[str, Any]:
     """
     Run Roboflow inference on split plot images using one or more model configs.
 
-    models: [
-        {"label": "Wheat", "roboflow_api_key": "...", "roboflow_model_id": "...", "task_type": "detection"},
-        ...
-    ]
+    trait_version: which TraitRecord version's cropped_images_v{N}/ to run inference on.
+                   If not specified, falls back to the latest cropped_images/ directory.
+                   Stored in inference result metadata to link back to the ortho + boundary used.
 
-    Reads:
-      - Processed/{workspace}/{pop}/{run_seg}/cropped_images/*.png
-
-    Writes one CSV per model:
-      - roboflow_predictions_{label}.csv
+    Each completed model run is appended as an entry in run.outputs["inference"] (list format).
     """
     import csv as _csv
-    from app.processing.inference_utils import run_inference_on_image
+    from app.processing.inference_utils import run_inference_on_image, merge_inference_into_geojson
+    from app.crud.pipeline import update_pipeline_run
+    from app.models.pipeline import PipelineRunUpdate, PipelineRun as _PipelineRun
+    from datetime import datetime, timezone
 
     if not models:
         raise ValueError("No inference models provided.")
 
     paths = _get_paths(session, run_id)
+    run = session.get(_PipelineRun, run_id)
+    outputs = dict(run.outputs or {}) if run else {}
 
-    plot_images = sorted(paths.cropped_images_dir.glob("*.png"))
-    if not plot_images:
+    # Resolve which crop directory to use
+    if trait_version is not None:
+        crops_dir = paths.cropped_images_versioned(trait_version)
+        if not crops_dir.exists():
+            # Fall back to canonical if versioned dir missing (e.g. old run before versioning)
+            crops_dir = paths.cropped_images_dir
+    else:
+        crops_dir = paths.cropped_images_dir
+        # Infer the active trait version from the latest versioned dir
+        if trait_version is None:
+            from app.models.pipeline import TraitRecord as _TR
+            from sqlmodel import func as _func, select as _sel
+            trait_version = session.exec(
+                _sel(_func.max(_TR.version)).where(_TR.run_id == run_id)
+            ).first()
+
+    if not crops_dir.exists() or not any(crops_dir.glob("*.png")):
         raise FileNotFoundError(
-            f"No cropped plot images found in {paths.cropped_images_dir}. "
+            f"No cropped plot images found in {crops_dir}. "
             "Complete the Trait Extraction step first."
         )
 
-    fieldnames = ["image", "class", "confidence", "x", "y", "width", "height"]
-    inference_paths: dict[str, str] = {}
+    plot_images = sorted(crops_dir.glob("*.png"))
+
+    # Load Traits GeoJSON for plot metadata (plot_id → label, bed, tier)
+    plot_meta: dict[str, dict] = {}
+    traits_geojson_path: Path | None = None
+    if trait_version is not None:
+        from app.models.pipeline import TraitRecord as _TR2
+        from sqlmodel import select as _sel2
+        _tr = session.exec(
+            _sel2(_TR2).where(_TR2.run_id == run_id, _TR2.version == trait_version)
+        ).first()
+        if _tr and _tr.geojson_path:
+            traits_geojson_path = paths.abs(_tr.geojson_path)
+    if traits_geojson_path is None:
+        # Fallback to canonical traits geojson
+        if paths.traits_geojson.exists():
+            traits_geojson_path = paths.traits_geojson
+    if traits_geojson_path and traits_geojson_path.exists():
+        with open(traits_geojson_path) as _gf:
+            _gj = json.load(_gf)
+        for _feat in _gj.get("features", []):
+            _props = _feat.get("properties") or {}
+            _pid = str(
+                _props.get("Plot") or _props.get("plot") or _props.get("plot_id") or ""
+            )
+            if _pid:
+                plot_meta[_pid] = {
+                    "plot_label": _pid,
+                    "accession": str(_props.get("Label") or _props.get("label") or _props.get("Accession") or ""),
+                    "row": str(_props.get("Tier") or _props.get("tier") or _props.get("row") or ""),
+                    "col": str(_props.get("Bed") or _props.get("bed") or _props.get("col") or ""),
+                }
+        logger.info("Loaded plot metadata: %d plots from %s", len(plot_meta), traits_geojson_path.name)
+
+    def _get_plot_id_from_png(img_path: Path) -> str:
+        """Extract plot_id from plot_{plot_id}.png"""
+        stem = img_path.stem  # "plot_ABC123" or "plot_5"
+        if stem.startswith("plot_"):
+            return stem[len("plot_"):]
+        return stem
+
+    # Normalise existing inference to list format
+    existing_inference = outputs.get("inference", [])
+    if isinstance(existing_inference, dict):
+        existing_inference = [
+            {"label": lbl, "csv_path": rel, "trait_version": None, "created_at": None}
+            for lbl, rel in existing_inference.items()
+        ]
+
+    fieldnames = ["image", "plot_id", "plot_label", "accession", "row", "col", "model_id",
+                  "class", "confidence", "x", "y", "width", "height", "points"]
+    new_entries: list[dict] = []
+    global_total = len(models) * len(plot_images)
+    global_done = 0
 
     for model in models:
         if stop_event.is_set():
@@ -852,8 +925,17 @@ def run_inference(
         model_id = model.get("roboflow_model_id", "")
         task_type = model.get("task_type", "detection")
 
-        emit({"event": "progress", "message": f"[{label}] Running on {len(plot_images)} plots…",
-              "total": len(plot_images)})
+        mode_tag = "local" if inference_mode == "local" else "cloud"
+        masked_key = (api_key[:4] + "…" + api_key[-4:]) if len(api_key) > 8 else "***"
+        emit({
+            "event": "log",
+            "message": (
+                f"[{label}] Starting {mode_tag} inference on {len(plot_images)} plots "
+                f"(trait v{trait_version}) — model: {model_id}, key: {masked_key}"
+            ),
+            "total": global_total,
+            "done": global_done,
+        })
 
         safe_label = "".join(c if c.isalnum() or c in "-_" else "_" for c in label)
         predictions_path = paths.processed_run / f"roboflow_predictions_{safe_label}.csv"
@@ -861,11 +943,40 @@ def run_inference(
 
         for i, img in enumerate(plot_images):
             if stop_event.is_set():
+                emit({"event": "log", "message": f"[{label}] Stopped after {i}/{len(plot_images)} plots."})
                 return {}
-            emit({"event": "progress", "index": i, "message": f"[{label}] {img.name}"})
-            preds = run_inference_on_image(img, api_key=api_key, model_id=model_id, task_type=task_type)
+
+            def _warn(msg: str, _lbl: str = label) -> None:
+                emit({"event": "log", "message": f"  ⚠ [{_lbl}] {msg}"})
+
+            preds = run_inference_on_image(
+                img, api_key=api_key, model_id=model_id, task_type=task_type,
+                inference_mode=inference_mode,
+                local_server_url=local_server_url or "",
+                on_warning=_warn,
+            )
+            global_done += 1
+            det_label = f"{len(preds)} detection{'s' if len(preds) != 1 else ''}" if preds else "no detections"
+            pct = round(global_done / global_total * 100)
+            emit({"event": "progress", "progress": pct})
+            emit({
+                "event": "log",
+                "message": f"[{label}] ({i + 1}/{len(plot_images)}) {img.name} → {det_label}",
+                "total": global_total,
+                "done": global_done,
+            })
+            plot_id = _get_plot_id_from_png(img)
+            meta = plot_meta.get(plot_id, {})
+            import json as _json2
             for p in preds:
                 p["image"] = img.name
+                p["plot_id"] = plot_id
+                p["plot_label"] = meta.get("plot_label", plot_id)
+                p["accession"] = meta.get("accession", "")
+                p["row"] = meta.get("row", "")
+                p["col"] = meta.get("col", "")
+                p["model_id"] = model_id
+                p["points"] = _json2.dumps(p["points"]) if p.get("points") else ""
             all_rows.extend(preds)
 
         with open(predictions_path, "w", newline="") as f:
@@ -873,10 +984,39 @@ def run_inference(
             writer.writeheader()
             writer.writerows(all_rows)
 
-        inference_paths[label] = paths.rel(predictions_path)
+        # Class breakdown summary
+        class_counts: dict[str, int] = {}
+        for r in all_rows:
+            cls = r.get("class", "?")
+            class_counts[cls] = class_counts.get(cls, 0) + 1
+        if class_counts:
+            breakdown = ", ".join(f"{cls}: {n}" for cls, n in sorted(class_counts.items()))
+            summary = f"[{label}] Done — {len(all_rows)} detections across {len(plot_images)} plots ({breakdown})"
+        else:
+            summary = f"[{label}] Done — 0 detections across {len(plot_images)} plots. Check model ID, API key, and confidence threshold."
+        emit({"event": "log", "message": summary})
         logger.info("[%s] Wrote %d predictions → %s", label, len(all_rows), predictions_path.name)
 
-    return {
-        "inference": inference_paths,
-        "traits": paths.rel(paths.traits_geojson) if paths.traits_geojson.exists() else None,
-    }
+        # Merge detection counts into Traits GeoJSON
+        if traits_geojson_path and traits_geojson_path.exists():
+            merge_inference_into_geojson(
+                traits_geojson_path, all_rows, model_label=label,
+                plot_id_field="plot_id", feature_match_prop="Plot",
+            )
+
+        new_entries.append({
+            "label": label,
+            "csv_path": paths.rel(predictions_path),
+            "trait_version": trait_version,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    if new_entries:
+        new_labels = {e["label"] for e in new_entries}
+        existing_inference = [e for e in existing_inference if e.get("label") not in new_labels]
+        existing_inference.extend(new_entries)
+        outputs["inference"] = existing_inference
+        run = session.get(_PipelineRun, run_id)
+        update_pipeline_run(session=session, db_run=run, run_in=PipelineRunUpdate(outputs=outputs))
+
+    return {}

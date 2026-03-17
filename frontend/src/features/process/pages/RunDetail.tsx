@@ -477,6 +477,24 @@ function TraitRecordsPanel({
     staleTime: 30_000,
   });
 
+  const { data: inferenceResults = [] } = useQuery<InferenceResult[]>({
+    queryKey: ["inference-summary", runId],
+    queryFn: async () => {
+      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/inference-summary`));
+      if (!res.ok) return [];
+      return res.json();
+    },
+    staleTime: 30_000,
+  });
+
+  // Count inference results per trait version
+  const inferenceCountByTraitVersion = inferenceResults.reduce<Record<number, number>>((acc, r) => {
+    if (r.trait_version != null) {
+      acc[r.trait_version] = (acc[r.trait_version] ?? 0) + 1;
+    }
+    return acc;
+  }, {});
+
   if (isLoading) {
     return (
       <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
@@ -497,11 +515,10 @@ function TraitRecordsPanel({
           <TableHeader>
             <TableRow className="text-xs">
               <TableHead className="py-2 text-xs w-10">v</TableHead>
-              <TableHead className="py-2 text-xs">Ortho</TableHead>
+              <TableHead className="py-2 text-xs">Ortho / Stitch</TableHead>
               <TableHead className="py-2 text-xs">Boundary</TableHead>
               <TableHead className="py-2 text-xs text-right">Plots</TableHead>
-              <TableHead className="py-2 text-xs text-right">VF avg</TableHead>
-              <TableHead className="py-2 text-xs text-right">Height avg</TableHead>
+              <TableHead className="py-2 text-xs text-right">Inferences</TableHead>
               <TableHead className="py-2 text-xs text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -512,7 +529,9 @@ function TraitRecordsPanel({
                   v{r.version}
                 </TableCell>
                 <TableCell className="py-1.5 font-mono">
-                  {versionLabel(r.ortho_version, r.ortho_name)}
+                  {r.pipeline_type === "ground"
+                    ? versionLabel(r.stitch_version, r.stitch_name)
+                    : versionLabel(r.ortho_version, r.ortho_name)}
                 </TableCell>
                 <TableCell className="py-1.5 font-mono">
                   {r.boundary_version != null
@@ -521,10 +540,7 @@ function TraitRecordsPanel({
                 </TableCell>
                 <TableCell className="py-1.5 text-right font-mono">{r.plot_count}</TableCell>
                 <TableCell className="py-1.5 text-right font-mono">
-                  {r.vf_avg != null ? r.vf_avg.toFixed(3) : "—"}
-                </TableCell>
-                <TableCell className="py-1.5 text-right font-mono">
-                  {r.height_avg != null ? `${r.height_avg.toFixed(2)} m` : "—"}
+                  {inferenceCountByTraitVersion[r.version] ?? 0}
                 </TableCell>
                 <TableCell className="py-1.5 text-right">
                   <Button
@@ -704,6 +720,19 @@ function StitchPanel({
   const [editingVersion, setEditingVersion] = useState<number | null>(null);
   const [editingName, setEditingName] = useState("");
   const [confirmDeleteVersion, setConfirmDeleteVersion] = useState<number | null>(null);
+  const [downloadingVersion, setDownloadingVersion] = useState<number | null>(null);
+  const [downloadDialog, setDownloadDialog] = useState<{ stitch: StitchVersion; selectedAssocVersion: number | null } | null>(null);
+
+  // Associations (for download naming)
+  const { data: associations = [] } = useQuery<AssociationVersion[]>({
+    queryKey: ["associations", runId],
+    queryFn: async () => {
+      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/associations`));
+      if (!res.ok) return [];
+      return res.json();
+    },
+    staleTime: 30_000,
+  });
 
   // Live plots during run (polled every 5s)
   const { data: liveData } = useQuery<{ plots: StitchPlot[]; version: number }>({
@@ -756,6 +785,31 @@ function StitchPanel({
       onRename(editingVersion, editingName.trim() || null);
     }
     setEditingVersion(null);
+  }
+
+  function openDownloadDialog(v: StitchVersion) {
+    // Default to latest association matching this stitch version
+    const matching = associations
+      .filter((a) => a.stitch_version === v.version)
+      .sort((a, b) => a.version - b.version);
+    const defaultAssoc = matching.length > 0 ? matching[matching.length - 1].version : null;
+    setDownloadDialog({ stitch: v, selectedAssocVersion: defaultAssoc });
+  }
+
+  async function confirmDownload() {
+    if (!downloadDialog) return;
+    const { stitch, selectedAssocVersion } = downloadDialog;
+    setDownloadDialog(null);
+    setDownloadingVersion(stitch.version);
+    const label = stitch.name ? `${stitch.name}_v${stitch.version}` : `v${stitch.version}`;
+    const assocParam = selectedAssocVersion != null ? `?association_version=${selectedAssocVersion}` : "";
+    await tauriDownload(
+      `/api/v1/pipeline-runs/${runId}/stitchings/${stitch.version}/download${assocParam}`,
+      `stitching_${label}.zip`,
+      "GET",
+      [{ name: "ZIP Archive", extensions: ["zip"] }],
+    );
+    setDownloadingVersion(null);
   }
 
   // ── During run: page viewer ────────────────────────────────────────────────
@@ -896,6 +950,18 @@ function StitchPanel({
                     <Button
                       variant="ghost"
                       size="icon"
+                      className="h-6 w-6"
+                      title="Download plots as ZIP"
+                      disabled={downloadingVersion === v.version}
+                      onClick={() => openDownloadDialog(v)}
+                    >
+                      {downloadingVersion === v.version
+                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        : <Download className="h-3.5 w-3.5" />}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
                       className="h-6 w-6 text-destructive hover:text-destructive"
                       title="Delete"
                       disabled={isDeleting}
@@ -943,6 +1009,63 @@ function StitchPanel({
         }}
         onCancel={() => setConfirmDeleteVersion(null)}
       />
+
+      {/* Download association selection dialog */}
+      <Dialog open={downloadDialog !== null} onOpenChange={(o) => !o && setDownloadDialog(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Download Stitching {downloadDialog?.stitch.name ? `"${downloadDialog.stitch.name}" (v${downloadDialog.stitch.version})` : `v${downloadDialog?.stitch.version}`}</DialogTitle>
+            <DialogDescription>
+              Select which association version to use for file naming.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {(() => {
+              const sv = downloadDialog?.stitch.version;
+              const matching = associations.filter((a) => a.stitch_version === sv);
+              const others = associations.filter((a) => a.stitch_version !== sv);
+              const allOptions = [...matching.sort((a, b) => b.version - a.version), ...others.sort((a, b) => b.version - a.version)];
+              if (allOptions.length === 0) {
+                return (
+                  <p className="text-xs text-muted-foreground">
+                    No association versions found. Images will be named by plot index.
+                  </p>
+                );
+              }
+              return (
+                <div className="space-y-1">
+                  <Label className="text-xs">Association Version</Label>
+                  <select
+                    className="border-input bg-background w-full rounded border px-2 py-1.5 text-sm"
+                    value={downloadDialog?.selectedAssocVersion ?? ""}
+                    onChange={(e) =>
+                      setDownloadDialog((d) =>
+                        d ? { ...d, selectedAssocVersion: e.target.value ? Number(e.target.value) : null } : d
+                      )
+                    }
+                  >
+                    <option value="">None (use plot index only)</option>
+                    {allOptions.map((a) => {
+                      const isMatch = a.stitch_version === sv;
+                      const label = `v${a.version} — stitch v${a.stitch_version ?? "?"} · boundary v${a.boundary_version ?? "?"}${isMatch ? " ✓" : ""}`;
+                      return (
+                        <option key={a.version} value={a.version}>{label}</option>
+                      );
+                    })}
+                  </select>
+                  {matching.length === 0 && (
+                    <p className="text-xs text-amber-600">No association matches stitch v{sv}. Using a different version may produce incorrect names.</p>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDownloadDialog(null)}>Cancel</Button>
+            <Button onClick={confirmDownload}>Download</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -952,6 +1075,10 @@ function StitchPanel({
 interface InferenceResult {
   label: string;
   csv_rel_path: string;
+  stitch_version: number | null;
+  association_version: number | null;
+  trait_version: number | null;
+  created_at: string | null;
   plot_count: number;
   total_predictions: number;
   classes: Record<string, number>;
@@ -969,10 +1096,10 @@ function GroundInferencePanel({
   const [confirmLabel, setConfirmLabel] = useState<string | null>(null);
 
   const { data: results = [], isLoading } = useQuery<InferenceResult[]>({
-    queryKey: ["inference-results", runId],
+    queryKey: ["inference-summary", runId],
     queryFn: async () => {
       const res = await fetch(
-        apiUrl(`/api/v1/pipeline-runs/${runId}/inference-results`)
+        apiUrl(`/api/v1/pipeline-runs/${runId}/inference-summary`)
       );
       if (!res.ok) return [];
       const data = await res.json();
@@ -999,6 +1126,8 @@ function GroundInferencePanel({
           <TableHeader>
             <TableRow>
               <TableHead className="py-2 text-xs">Label</TableHead>
+              <TableHead className="py-2 text-xs">Stitch</TableHead>
+              <TableHead className="py-2 text-xs">Assoc</TableHead>
               <TableHead className="py-2 text-xs text-right">Plots</TableHead>
               <TableHead className="py-2 text-xs text-right">Predictions</TableHead>
               <TableHead className="py-2 text-xs">Classes</TableHead>
@@ -1009,6 +1138,12 @@ function GroundInferencePanel({
             {results.map((r) => (
               <TableRow key={r.label} className="text-xs">
                 <TableCell className="py-2 font-medium">{r.label}</TableCell>
+                <TableCell className="py-2 text-muted-foreground font-mono">
+                  {r.stitch_version != null ? `v${r.stitch_version}` : "—"}
+                </TableCell>
+                <TableCell className="py-2 text-muted-foreground font-mono">
+                  {r.association_version != null ? `v${r.association_version}` : "—"}
+                </TableCell>
                 <TableCell className="py-2 text-right">{r.plot_count}</TableCell>
                 <TableCell className="py-2 text-right">{r.total_predictions}</TableCell>
                 <TableCell className="py-2">
@@ -1066,6 +1201,135 @@ function GroundInferencePanel({
           setConfirmLabel(null);
         }}
         onCancel={() => setConfirmLabel(null)}
+      />
+    </>
+  );
+}
+
+// ── Ground: association versions panel ───────────────────────────────────────
+
+interface AssociationVersion {
+  version: number;
+  stitch_version: number | null;
+  boundary_version: number | null;
+  association_path: string;
+  matched: number;
+  total: number;
+  created_at: string | null;
+}
+
+function AssociationVersionsPanel({
+  runId,
+  stitchVersions,
+  boundaryVersions,
+  onDelete,
+  isDeleting,
+}: {
+  runId: string;
+  stitchVersions: StitchVersion[];
+  boundaryVersions: PlotBoundaryVersion[];
+  onDelete: (version: number) => void;
+  isDeleting: boolean;
+}) {
+  const [confirmDeleteVersion, setConfirmDeleteVersion] = useState<number | null>(null);
+
+  const { data: versions = [], isLoading } = useQuery<AssociationVersion[]>({
+    queryKey: ["associations", runId],
+    queryFn: async () => {
+      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/associations`));
+      if (!res.ok) return [];
+      return res.json();
+    },
+    staleTime: 30_000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Loading associations…
+      </div>
+    );
+  }
+
+  if (versions.length === 0) return null;
+
+  const confirmEntry = versions.find((v) => v.version === confirmDeleteVersion);
+
+  function stitchLabel(sv: number | null) {
+    if (sv === null) return "—";
+    const entry = stitchVersions.find((s) => s.version === sv);
+    return entry?.name ? `${entry.name} (v${sv})` : `v${sv}`;
+  }
+
+  function boundaryLabel(bv: number | null) {
+    if (bv === null) return "—";
+    const entry = boundaryVersions.find((b) => b.version === bv);
+    return entry?.name ? `${entry.name} (v${bv})` : `v${bv}`;
+  }
+
+  return (
+    <>
+      <div className="mt-3 rounded-lg border overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="py-2 text-xs">Version</TableHead>
+              <TableHead className="py-2 text-xs">Stitch Used</TableHead>
+              <TableHead className="py-2 text-xs">Boundary Used</TableHead>
+              <TableHead className="py-2 text-xs text-right">Matched</TableHead>
+              <TableHead className="py-2 text-xs">Created</TableHead>
+              <TableHead className="py-2 text-xs text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {versions.map((v) => (
+              <TableRow key={v.version} className="text-xs">
+                <TableCell className="py-1.5 font-medium">v{v.version}</TableCell>
+                <TableCell className="py-1.5 text-muted-foreground font-mono">
+                  {stitchLabel(v.stitch_version)}
+                </TableCell>
+                <TableCell className="py-1.5 text-muted-foreground font-mono">
+                  {boundaryLabel(v.boundary_version)}
+                </TableCell>
+                <TableCell className="py-1.5 text-right font-mono">
+                  {v.matched}/{v.total}
+                </TableCell>
+                <TableCell className="py-1.5 text-muted-foreground">
+                  {v.created_at ? new Date(v.created_at).toLocaleString() : "—"}
+                </TableCell>
+                <TableCell className="py-1.5 text-right">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 text-destructive hover:text-destructive"
+                    title="Delete"
+                    disabled={isDeleting}
+                    onClick={() => setConfirmDeleteVersion(v.version)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+
+      <ConfirmDeleteDialog
+        open={confirmDeleteVersion !== null}
+        title="Delete association version?"
+        description={
+          confirmEntry
+            ? `Delete association v${confirmEntry.version} (${confirmEntry.matched}/${confirmEntry.total} plots matched)? The CSV file will be removed.`
+            : "Delete this association version?"
+        }
+        isDeleting={isDeleting}
+        onConfirm={() => {
+          if (confirmDeleteVersion !== null) onDelete(confirmDeleteVersion);
+          setConfirmDeleteVersion(null);
+        }}
+        onCancel={() => setConfirmDeleteVersion(null)}
       />
     </>
   );
@@ -1267,6 +1531,7 @@ interface PlotBoundaryVersion {
   name: string | null;
   geojson_path: string;
   ortho_version: number | null;
+  stitch_version: number | null;
   created_at: string | null;
   active: boolean;
 }
@@ -1588,6 +1853,7 @@ function OrthoVersionsPanel({
 function PlotBoundaryVersionsPanel({
   versions,
   orthoVersions,
+  pipelineType = "aerial",
   onRename,
   onDelete,
   downloadingCropsBv,
@@ -1596,6 +1862,7 @@ function PlotBoundaryVersionsPanel({
 }: {
   versions: PlotBoundaryVersion[];
   orthoVersions: OrthoVersion[];
+  pipelineType?: "aerial" | "ground";
   onRename: (version: number, name: string) => void;
   onDelete: (version: number) => void;
   downloadingCropsBv: number | null;
@@ -1642,7 +1909,11 @@ function PlotBoundaryVersionsPanel({
           <TableHeader>
             <TableRow>
               <TableHead>Version</TableHead>
-              <TableHead>Ortho Used</TableHead>
+              {pipelineType === "aerial" ? (
+                <TableHead>Ortho Used</TableHead>
+              ) : (
+                <TableHead>Stitch Used</TableHead>
+              )}
               <TableHead>Created</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -1696,14 +1967,21 @@ function PlotBoundaryVersionsPanel({
                     </button>
                   )}
                 </TableCell>
-                <TableCell className="text-muted-foreground text-sm">
-                  {v.ortho_version != null ? `v${v.ortho_version}` : "—"}
-                </TableCell>
+                {pipelineType === "aerial" ? (
+                  <TableCell className="text-muted-foreground text-sm">
+                    {v.ortho_version != null ? `v${v.ortho_version}` : "—"}
+                  </TableCell>
+                ) : (
+                  <TableCell className="text-muted-foreground text-sm">
+                    {v.stitch_version != null ? `v${v.stitch_version}` : "—"}
+                  </TableCell>
+                )}
                 <TableCell className="text-muted-foreground text-sm">
                   {v.created_at ? new Date(v.created_at).toLocaleString() : "—"}
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex items-center justify-end gap-1">
+                    {pipelineType === "aerial" && (
                     <Button
                       variant="ghost"
                       size="icon"
@@ -1721,6 +1999,7 @@ function PlotBoundaryVersionsPanel({
                         <Download className="h-3.5 w-3.5" />
                       )}
                     </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="icon"
@@ -2073,7 +2352,7 @@ export function RunDetail() {
         return r.json();
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["inference-results", runId] });
+      queryClient.invalidateQueries({ queryKey: ["inference-summary", runId] });
       queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
     },
     onError: () => showErrorToast("Failed to delete inference result"),
@@ -2144,7 +2423,6 @@ export function RunDetail() {
     onError: () => showErrorToast("Failed to rename stitching version"),
   });
 
-  // Plot boundary versions (aerial only)
   const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
     useQuery<PlotBoundaryVersion[]>({
       queryKey: ["plot-boundaries", runId],
@@ -2154,12 +2432,31 @@ export function RunDetail() {
             Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
           },
         }).then((r) => r.json()),
-      enabled:
-        !!run &&
-        pipelineType === "aerial" &&
-        !!run.steps_completed?.plot_boundary_prep,
+      enabled: !!run && !!run.steps_completed?.plot_boundary_prep,
       refetchInterval: false,
     });
+
+  // Page-level stitch versions (needed for associate_boundaries dialog)
+  const { data: pageStitchVersions } = useQuery<StitchVersion[]>({
+    queryKey: ["stitch-versions", runId],
+    queryFn: async () => {
+      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/stitchings`));
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!run && pipelineType === "ground",
+    staleTime: 30_000,
+  });
+
+  const deleteAssociationMutation = useMutation({
+    mutationFn: (version: number) =>
+      fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/associations/${version}`), {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
+      }).then((r) => { if (!r.ok) throw new Error("Failed"); return r.json(); }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["associations", runId] }),
+    onError: () => showErrorToast("Failed to delete association"),
+  });
 
   const renamePlotBoundaryMutation = useMutation({
     mutationFn: ({ version, name }: { version: number; name: string }) =>
@@ -2440,6 +2737,11 @@ export function RunDetail() {
     number | null
   >(null);
 
+  // Associate boundaries version selection dialog
+  const [showAssocDialog, setShowAssocDialog] = useState(false);
+  const [assocStitchVersion, setAssocStitchVersion] = useState<number | null>(null);
+  const [assocBoundaryVersion, setAssocBoundaryVersion] = useState<number | null>(null);
+
   function startStitchWithName() {
     setShowStitchNameDialog(false);
     stopWasRequestedRef.current = false;
@@ -2451,6 +2753,15 @@ export function RunDetail() {
 
   // Guarded step runner — checks Docker availability before starting orthomosaic
   async function handleRunStep(step: string) {
+    if (step === "associate_boundaries") {
+      // Always show dialog so user can confirm which versions to use
+      const stitchVers = pageStitchVersions ?? [];
+      const boundaryVers = plotBoundaryVersions ?? [];
+      setAssocStitchVersion(stitchVers[0]?.version ?? null);
+      setAssocBoundaryVersion(boundaryVers[0]?.version ?? null);
+      setShowAssocDialog(true);
+      return;
+    }
     if (step === "stitching") {
       setStitchNameInput("");
       setShowStitchNameDialog(true);
@@ -2505,6 +2816,16 @@ export function RunDetail() {
       step: "trait_extraction",
       ortho_version: traitOrthoVersion ?? undefined,
       boundary_version: traitBoundaryVersion ?? undefined,
+    } as any);
+  }
+
+  function startAssociation() {
+    setShowAssocDialog(false);
+    stopWasRequestedRef.current = false;
+    executeMutation.mutate({
+      step: "associate_boundaries",
+      stitch_version: assocStitchVersion ?? undefined,
+      boundary_version: assocBoundaryVersion ?? undefined,
     } as any);
   }
 
@@ -2828,7 +3149,6 @@ export function RunDetail() {
                     }
                     if (
                       step.key === "plot_boundary_prep" &&
-                      pipelineType === "aerial" &&
                       plotBoundaryVersions &&
                       plotBoundaryVersions.length > 0
                     ) {
@@ -2836,6 +3156,7 @@ export function RunDetail() {
                         <PlotBoundaryVersionsPanel
                           versions={plotBoundaryVersions}
                           orthoVersions={orthoVersions ?? []}
+                          pipelineType={pipelineType as "aerial" | "ground"}
                           onRename={(v, name) =>
                             renamePlotBoundaryMutation.mutate({
                               version: v,
@@ -2857,6 +3178,17 @@ export function RunDetail() {
                           onDelete={(v) => deleteStitchMutation.mutate(v)}
                           onRename={(v, name) => renameStitchMutation.mutate({ version: v, name })}
                           isDeleting={deleteStitchMutation.isPending}
+                        />
+                      );
+                    }
+                    if (step.key === "associate_boundaries" && pipelineType === "ground") {
+                      return (
+                        <AssociationVersionsPanel
+                          runId={runId}
+                          stitchVersions={pageStitchVersions ?? []}
+                          boundaryVersions={plotBoundaryVersions ?? []}
+                          onDelete={(v) => deleteAssociationMutation.mutate(v)}
+                          isDeleting={deleteAssociationMutation.isPending}
                         />
                       );
                     }
@@ -2981,6 +3313,58 @@ export function RunDetail() {
               Cancel
             </Button>
             <Button onClick={startOrthoWithName}>Start</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Associate boundaries version selection dialog */}
+      <Dialog open={showAssocDialog} onOpenChange={(open) => !open && setShowAssocDialog(false)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Select Versions for Association</DialogTitle>
+            <DialogDescription>
+              Choose which stitch version and plot boundary version to associate.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {(pageStitchVersions?.length ?? 0) > 0 && (
+              <div className="space-y-1">
+                <Label className="text-sm">Stitch Version</Label>
+                <select
+                  className="border-input bg-background w-full rounded border px-3 py-2 text-sm"
+                  value={assocStitchVersion ?? ""}
+                  onChange={(e) => setAssocStitchVersion(Number(e.target.value))}
+                >
+                  {pageStitchVersions!.map((sv) => (
+                    <option key={sv.version} value={sv.version}>
+                      {sv.name ? `${sv.name} (v${sv.version})` : `v${sv.version}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {(plotBoundaryVersions?.length ?? 0) > 0 && (
+              <div className="space-y-1">
+                <Label className="text-sm">Plot Boundary Version</Label>
+                <select
+                  className="border-input bg-background w-full rounded border px-3 py-2 text-sm"
+                  value={assocBoundaryVersion ?? ""}
+                  onChange={(e) => setAssocBoundaryVersion(Number(e.target.value))}
+                >
+                  {plotBoundaryVersions!.map((bv) => (
+                    <option key={bv.version} value={bv.version}>
+                      {bv.name ? `${bv.name} (v${bv.version})` : `v${bv.version}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAssocDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={startAssociation}>Run Association</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

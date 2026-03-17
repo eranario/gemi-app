@@ -56,11 +56,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function fmt(n: number | null | undefined, digits = 3): string {
-  if (n == null) return "—";
-  return n.toFixed(digits);
-}
-
 function downloadCsv(content: string, filename: string) {
   const blob = new Blob([content], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
@@ -225,11 +220,9 @@ const traitRecordColumns: ColumnDef<TraitRecord>[] = [
     filterFn: (row, id, values: string[]) => values.includes(row.getValue(id)),
   },
   { id: "version", enableColumnFilter: false },
-  { id: "ortho", enableColumnFilter: false },
+  { id: "ortho_stitch", enableColumnFilter: false },
   { id: "boundary", enableColumnFilter: false },
   { id: "plot_count", enableColumnFilter: false },
-  { id: "vf_avg", enableColumnFilter: false },
-  { id: "height_avg", enableColumnFilter: false },
 ];
 
 function TableTab({ records }: { records: TraitRecord[] }) {
@@ -289,18 +282,16 @@ function TableTab({ records }: { records: TraitRecord[] }) {
                 <ColumnFilter column={table.getColumn("date")!} title="Date" />
               </TableHead>
               <TableHead className="w-12">Version</TableHead>
-              <TableHead>Ortho</TableHead>
+              <TableHead>Ortho / Stitch</TableHead>
               <TableHead>Boundary</TableHead>
               <TableHead className="text-right">Plots</TableHead>
-              <TableHead className="text-right">VF avg</TableHead>
-              <TableHead className="text-right">Height avg</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={10}
+                  colSpan={8}
                   className="text-muted-foreground py-8 text-center text-sm"
                 >
                   No trait records match the current filter.
@@ -337,11 +328,19 @@ function TableTab({ records }: { records: TraitRecord[] }) {
                       v{r.version}
                     </TableCell>
                     <TableCell>
-                      <VersionBadge
-                        version={r.ortho_version}
-                        name={r.ortho_name}
-                        label="Ortho"
-                      />
+                      {r.pipeline_type === "ground" ? (
+                        <VersionBadge
+                          version={r.stitch_version}
+                          name={r.stitch_name}
+                          label="Stitch"
+                        />
+                      ) : (
+                        <VersionBadge
+                          version={r.ortho_version}
+                          name={r.ortho_name}
+                          label="Ortho"
+                        />
+                      )}
                     </TableCell>
                     <TableCell>
                       <VersionBadge
@@ -353,16 +352,10 @@ function TableTab({ records }: { records: TraitRecord[] }) {
                     <TableCell className="text-right font-mono text-sm">
                       {r.plot_count}
                     </TableCell>
-                    <TableCell className="text-right font-mono text-sm">
-                      {fmt(r.vf_avg)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-sm">
-                      {r.height_avg != null ? `${fmt(r.height_avg)} m` : "—"}
-                    </TableCell>
                   </TableRow>
                   {expandedId === r.id && (
                     <TableRow key={`${r.id}-expanded`}>
-                      <TableCell colSpan={9} className="p-0">
+                      <TableCell colSpan={7} className="p-0">
                         <ExpandedPlotTable recordId={r.id} />
                       </TableCell>
                     </TableRow>

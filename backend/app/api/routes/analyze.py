@@ -267,6 +267,16 @@ def list_trait_records(
         if pipeline_id and pipeline.id != pipeline_id:
             continue
         workspace = session.get(Workspace, pipeline.workspace_id)
+        run_outputs = run.outputs or {}
+        # For ground pipelines, derive stitch version from run outputs
+        if pipeline.type == "ground":
+            stitch_v = int(run_outputs.get("stitching_version") or 0) or None
+            stitchings = run_outputs.get("stitchings") or []
+            stitch_entry = next((s for s in stitchings if s.get("version") == stitch_v), None)
+            stitch_name = stitch_entry.get("name") if stitch_entry else None
+        else:
+            stitch_v = None
+            stitch_name = None
         result.append({
             "id": str(record.id),
             "run_id": str(record.run_id),
@@ -284,12 +294,12 @@ def list_trait_records(
             "version": record.version,
             "ortho_version": record.ortho_version,
             "ortho_name": record.ortho_name,
+            "stitch_version": stitch_v,
+            "stitch_name": stitch_name,
             "boundary_version": record.boundary_version,
             "boundary_name": record.boundary_name,
             "plot_count": record.plot_count,
             "trait_columns": record.trait_columns or [],
-            "vf_avg": record.vf_avg,
-            "height_avg": record.height_avg,
             "created_at": record.created_at,
         })
     return result
@@ -380,10 +390,11 @@ def get_trait_record_ortho_info(
         geo_rel = outputs.get("georeferencing")
         if not geo_rel:
             return not_available
+        stitch_v = int(outputs.get("stitching_version") or 1)
         tif = paths.abs(geo_rel) / "combined_mosaic.tif"
         if not tif.exists():
             return not_available
-        preview_url = f"/api/v1/files/serve?path={tif}"
+        preview_url = f"/api/v1/pipeline-runs/{run.id}/mosaic-preview?stitch_version={stitch_v}"
 
     bounds = _read_tif_bounds(tif)
     return {"available": True, "bounds": bounds, "preview_url": preview_url}
@@ -526,7 +537,13 @@ def get_ortho_info(
         geo_rel = outputs.get("georeferencing")
         if not geo_rel:
             return not_available
+        stitch_v = int(outputs.get("stitching_version") or 1)
         tif = paths.abs(geo_rel) / "combined_mosaic.tif"
+        if not tif.exists():
+            return not_available
+        bounds = _read_tif_bounds(tif)
+        preview_url = f"/api/v1/pipeline-runs/{run.id}/mosaic-preview?stitch_version={stitch_v}"
+        return {"available": True, "path": None, "bounds": bounds, "preview_url": preview_url}
     else:
         tif = paths.aerial_rgb_pyramid if paths.aerial_rgb_pyramid.exists() else paths.aerial_rgb
 

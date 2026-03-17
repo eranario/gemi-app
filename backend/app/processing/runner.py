@@ -243,9 +243,14 @@ def run_step_in_background(
                     existing_list.append(new_entry)
                     existing_outputs["orthomosaics"] = existing_list
 
+                # Extra steps to mark complete (e.g. georeferencing auto-completes plot_boundary_prep)
+                extra_steps: list[str] = outputs.pop("_mark_steps_complete", [])
+
                 existing_outputs.update(outputs)
                 existing_steps = dict(run.steps_completed or {})
                 existing_steps[step] = True
+                for s in extra_steps:
+                    existing_steps[s] = True
                 all_steps = _all_steps_for_run(run)
                 all_done = all(existing_steps.get(s, False) for s in all_steps)
                 update_pipeline_run(

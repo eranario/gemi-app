@@ -90,9 +90,10 @@ def crop_image_with_overlap(
 
 
 def _transform_to_image_coords(predictions: list[dict], crop_info: dict) -> list[dict]:
-    """Shift crop-level box centres to image-level coordinates."""
-    return [
-        {
+    """Shift crop-level box centres and polygon points to image-level coordinates."""
+    result = []
+    for p in predictions:
+        transformed: dict[str, Any] = {
             "class": p.get("class", ""),
             "confidence": p.get("confidence", 0.0),
             "x": p.get("x", 0) + crop_info["x_offset"],
@@ -101,8 +102,15 @@ def _transform_to_image_coords(predictions: list[dict], crop_info: dict) -> list
             "height": p.get("height", 0),
             "crop_id": crop_info["crop_id"],
         }
-        for p in predictions
-    ]
+        # Segmentation: offset polygon points to image-level coordinates
+        raw_points = p.get("points", [])
+        if raw_points:
+            transformed["points"] = [
+                {"x": pt["x"] + crop_info["x_offset"], "y": pt["y"] + crop_info["y_offset"]}
+                for pt in raw_points
+            ]
+        result.append(transformed)
+    return result
 
 
 # ── NMS ───────────────────────────────────────────────────────────────────────
@@ -145,6 +153,36 @@ def apply_nms(predictions: list[dict], iou_threshold: float = 0.5) -> list[dict]
     return kept
 
 
+# ── Local inference server helpers ─────────────────────────────────────────────
+
+CLOUD_API_URL = "https://detect.roboflow.com"
+LOCAL_API_URL = "http://localhost:9001"
+
+
+def _is_local_server_running(host: str = "localhost", port: int = 9001) -> bool:
+    import socket
+    try:
+        with socket.create_connection((host, port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def _start_local_server() -> None:
+    """Attempt to start the Roboflow local inference server."""
+    import subprocess
+    import time
+    logger.info("Starting local Roboflow inference server…")
+    subprocess.Popen(["inference", "server", "start"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # Wait up to 30 s for it to become available
+    for _ in range(30):
+        if _is_local_server_running():
+            logger.info("Local inference server is ready.")
+            return
+        time.sleep(1)
+    raise RuntimeError("Local Roboflow inference server did not start within 30 seconds.")
+
+
 # ── Main inference entry point ─────────────────────────────────────────────────
 
 def run_inference_on_image(
@@ -152,25 +190,44 @@ def run_inference_on_image(
     api_key: str,
     model_id: str,
     task_type: str = "detection",
-    confidence_threshold: float = 0.5,
+    confidence_threshold: float = 0.1,
     iou_threshold: float = 0.5,
     crop_size: int = 640,
     overlap: int = 32,
+    inference_mode: str = "cloud",
+    local_server_url: str = LOCAL_API_URL,
+    on_warning: Any = None,
 ) -> list[dict[str, Any]]:
     """
     Run Roboflow inference on one (potentially large) image.
 
+    inference_mode: "cloud" uses detect.roboflow.com; "local" uses a local
+    inference server (auto-started if not already running).
+
     Crops the image into overlapping patches, runs inference on each,
     transforms coordinates back to image level, applies NMS.
+
+    on_warning: optional callable(str) — called with a warning message for
+    each crop that fails (in addition to logger.warning).
 
     Returns a list of prediction dicts with image-level (x, y, width, height).
     """
     from inference_sdk import InferenceHTTPClient, InferenceConfiguration
 
-    client = InferenceHTTPClient(
-        api_url="https://detect.roboflow.com",
-        api_key=api_key,
-    )
+    if inference_mode == "local":
+        api_url = local_server_url or LOCAL_API_URL
+        host = api_url.split("://")[-1].split(":")[0]
+        port_str = api_url.split(":")[-1].rstrip("/") if ":" in api_url.split("://")[-1] else "9001"
+        try:
+            port = int(port_str)
+        except ValueError:
+            port = 9001
+        if not _is_local_server_running(host, port):
+            _start_local_server()
+    else:
+        api_url = CLOUD_API_URL
+
+    client = InferenceHTTPClient(api_url=api_url, api_key=api_key)
     client.configure(InferenceConfiguration(confidence_threshold=confidence_threshold))
 
     crops = crop_image_with_overlap(image_path, crop_size=crop_size, overlap=overlap)
@@ -178,6 +235,7 @@ def run_inference_on_image(
         return []
 
     all_predictions: list[dict] = []
+    crop_errors = 0
     temp_dir = crops[0]["temp_dir"]
 
     try:
@@ -187,8 +245,82 @@ def run_inference_on_image(
                 raw = result.get("predictions", []) if isinstance(result, dict) else []
                 all_predictions.extend(_transform_to_image_coords(raw, crop_info))
             except Exception as exc:
+                crop_errors += 1
+                msg = f"Crop {crop_info['crop_id']}/{len(crops)} failed: {exc}"
                 logger.warning("Inference failed on crop %d of %s: %s", crop_info["crop_id"], image_path, exc)
+                if on_warning:
+                    on_warning(msg)
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    return apply_nms(all_predictions, iou_threshold=iou_threshold)
+    after_nms = apply_nms(all_predictions, iou_threshold=iou_threshold)
+    logger.debug(
+        "%s: %d crops, %d raw predictions → %d after NMS%s",
+        Path(image_path).name, len(crops), len(all_predictions), len(after_nms),
+        f" ({crop_errors} crop errors)" if crop_errors else "",
+    )
+    return after_nms
+
+
+# ── Traits GeoJSON integration ────────────────────────────────────────────────
+
+def merge_inference_into_geojson(
+    geojson_path: Path,
+    predictions: list[dict],
+    model_label: str,
+    plot_id_field: str = "plot_id",
+    feature_match_prop: str = "Plot",
+) -> None:
+    """
+    Add {model_label}/{class} detection-count columns to a Traits GeoJSON.
+
+    For each GeoJSON feature whose `feature_match_prop` property matches a
+    `plot_id_field` value in predictions, the count of detections per class is
+    written as a new property.  Features with no predictions get 0.
+
+    Creates the file if it does not exist (writes an empty FeatureCollection
+    with only inference columns — caller should ensure the file exists first).
+    Overwrites the GeoJSON in place.
+    """
+    import json as _json
+
+    if not geojson_path.exists():
+        logger.warning("merge_inference_into_geojson: %s not found, skipping", geojson_path)
+        return
+
+    with open(geojson_path) as f:
+        gj = _json.load(f)
+
+    # Count predictions per plot_id and class
+    counts: dict[str, dict[str, int]] = {}
+    for row in predictions:
+        pid = str(row.get(plot_id_field) or "")
+        cls = str(row.get("class") or "")
+        if pid and cls:
+            inner = counts.setdefault(pid, {})
+            inner[cls] = inner.get(cls, 0) + 1
+
+    all_classes = sorted({cls for class_counts in counts.values() for cls in class_counts})
+    if not all_classes:
+        return  # Nothing to merge
+
+    for feat in gj.get("features", []):
+        props = feat.get("properties") or {}
+        # Match feature to a plot_id using the configured property key
+        pid = str(
+            props.get(feature_match_prop)
+            or props.get(feature_match_prop.lower())
+            or ""
+        )
+        plot_counts = counts.get(pid, {})
+        for cls in all_classes:
+            props[f"{model_label}/{cls}"] = plot_counts.get(cls, 0)
+        feat["properties"] = props
+
+    with open(geojson_path, "w") as f:
+        _json.dump(gj, f)
+
+    logger.info(
+        "merge_inference_into_geojson: added %d class columns (%s) to %s",
+        len(all_classes), ", ".join(all_classes), geojson_path.name,
+    )

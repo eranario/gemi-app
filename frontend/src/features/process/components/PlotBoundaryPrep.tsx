@@ -70,6 +70,10 @@ interface OrthoInfo {
   active_ortho_version?: number | null;
   plot_boundary_ortho_version?: number | null;
   ortho_versions?: { version: number; name: string | null }[];
+  plot_boundary_versions?: { version: number; name: string | null; created_at: string | null }[];
+  active_plot_boundary_version?: number | null;
+  stitch_versions?: { version: number; name: string | null }[];
+  active_stitch_version?: number | null;
 }
 
 interface FieldDesignInfo {
@@ -91,6 +95,7 @@ interface GridOptions {
 
 interface PlotBoundaryPrepProps {
   runId: string;
+  pipelineType?: "aerial" | "ground";
   onSaved: () => void;
   onCancel: () => void;
 }
@@ -620,6 +625,7 @@ function GridSettingsPanel({
   onClearSelection,
   featureCount,
   selectedCount,
+  hideGridInputs = false,
 }: {
   options: GridOptions;
   onChange: (opts: GridOptions) => void;
@@ -629,6 +635,7 @@ function GridSettingsPanel({
   onClearSelection: () => void;
   featureCount: number;
   selectedCount: number;
+  hideGridInputs?: boolean;
 }) {
   const [minimized, setMinimized] = useState(false);
 
@@ -653,7 +660,7 @@ function GridSettingsPanel({
     <div className="bg-background/95 absolute bottom-4 left-4 z-[1000] w-64 rounded-lg border shadow-lg">
       {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-2">
-        <p className="text-sm font-medium">Plot Grid Settings</p>
+        <p className="text-sm font-medium">Plot Settings</p>
         <button
           onClick={() => setMinimized((m) => !m)}
           className="text-muted-foreground hover:text-foreground"
@@ -668,29 +675,43 @@ function GridSettingsPanel({
 
       {!minimized && (
         <div className="space-y-3 p-4">
-          <div className="grid grid-cols-2 gap-2">
-            {field("Width (m)", "width")}
-            {field("Length (m)", "length")}
-            {field("Rows", "rows", 1)}
-            {field("Columns", "columns", 1)}
-            {field("V. Spacing (m)", "verticalSpacing")}
-            {field("H. Spacing (m)", "horizontalSpacing")}
-          </div>
+          {!hideGridInputs && (
+            <div className="grid grid-cols-2 gap-2">
+              {field("Width (m)", "width")}
+              {field("Length (m)", "length")}
+              {field("Rows", "rows", 1)}
+              {field("Columns", "columns", 1)}
+              {field("V. Spacing (m)", "verticalSpacing")}
+              {field("H. Spacing (m)", "horizontalSpacing")}
+            </div>
+          )}
           <div>
-            <Label className="text-xs">
-              Angle (°) — {options.angle.toFixed(1)}
-            </Label>
-            <input
-              type="range"
-              min={0}
-              max={360}
-              step={0.5}
-              value={options.angle}
-              onChange={(e) =>
-                onChange({ ...options, angle: parseFloat(e.target.value) })
-              }
-              className="mt-1 w-full"
-            />
+            <Label className="text-xs">Angle (°)</Label>
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                type="range"
+                min={-180}
+                max={180}
+                step={0.5}
+                value={options.angle}
+                onChange={(e) =>
+                  onChange({ ...options, angle: parseFloat(e.target.value) })
+                }
+                className="flex-1"
+              />
+              <Input
+                type="number"
+                min={-180}
+                max={180}
+                step={0.5}
+                value={options.angle}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (!isNaN(v)) onChange({ ...options, angle: Math.max(-180, Math.min(180, v)) });
+                }}
+                className="h-7 w-16 text-xs"
+              />
+            </div>
           </div>
 
           {/* Mode buttons */}
@@ -709,7 +730,7 @@ function GridSettingsPanel({
               onClick={() => onModeChange("move")}
             >
               <Move className="mr-1.5 h-3 w-3" />
-              Move Grid
+              Move
             </Button>
           </div>
 
@@ -744,7 +765,7 @@ function GridSettingsPanel({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function PlotBoundaryPrep({ runId, onCancel }: PlotBoundaryPrepProps) {
+export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onSaved }: PlotBoundaryPrepProps) {
   const { showErrorToast, showSuccessToast } = useCustomToast();
   const queryClient = useQueryClient();
 
@@ -794,6 +815,9 @@ export function PlotBoundaryPrep({ runId, onCancel }: PlotBoundaryPrepProps) {
   const [selectedOrthoVersion, setSelectedOrthoVersion] = useState<
     number | null
   >(null);
+  const [selectedBoundaryVersion, setSelectedBoundaryVersion] = useState<number | null>(null);
+  const [selectedStitchVersion, setSelectedStitchVersion] = useState<number | null>(null);
+  const [mapInitialized, setMapInitialized] = useState(false);
 
   // Fetch mosaic/orthomosaic info (serves as background + provides existing boundaries)
   const { data: orthoInfo, isLoading: orthoLoading } = useQuery<OrthoInfo>({
@@ -815,6 +839,24 @@ export function PlotBoundaryPrep({ runId, onCancel }: PlotBoundaryPrepProps) {
           Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
         },
       }).then((r) => r.json()),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  });
+
+  // Ground only: estimate boundary + grid from georeferenced TIF extents (first visit)
+  const { data: autoBoundaryData } = useQuery<{
+    available: boolean;
+    pop_boundary?: GeoJSON.Feature;
+    grid_options?: GridOptions;
+  }>({
+    queryKey: ["auto-boundary", runId],
+    queryFn: () =>
+      fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/auto-boundary`), {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+        },
+      }).then((r) => r.json()),
+    enabled: !orthoInfo?.existing_geojson && !!orthoInfo?.available,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
   });
@@ -843,6 +885,31 @@ export function PlotBoundaryPrep({ runId, onCancel }: PlotBoundaryPrepProps) {
     if (v != null) setSelectedOrthoVersion(v);
   }, [orthoInfo?.plot_boundary_ortho_version, orthoInfo?.active_ortho_version]);
 
+  // Initialize selectedBoundaryVersion from active version
+  useEffect(() => {
+    if (!orthoInfo) return;
+    if (orthoInfo.active_plot_boundary_version != null) {
+      setSelectedBoundaryVersion(orthoInfo.active_plot_boundary_version);
+    }
+  }, [orthoInfo?.active_plot_boundary_version]);
+
+  // Initialize selectedStitchVersion from active stitch version (ground only)
+  useEffect(() => {
+    if (!orthoInfo) return;
+    if (orthoInfo.active_stitch_version != null) {
+      setSelectedStitchVersion(orthoInfo.active_stitch_version);
+    }
+  }, [orthoInfo?.active_stitch_version]);
+
+  // Update image overlay URL when stitch version changes (ground only)
+  useEffect(() => {
+    if (!imageOverlayRef.current || selectedStitchVersion == null) return;
+    const url = apiUrl(
+      `/api/v1/pipeline-runs/${runId}/mosaic-preview?stitch_version=${selectedStitchVersion}`
+    );
+    imageOverlayRef.current.setUrl(url);
+  }, [selectedStitchVersion, runId]);
+
   // Update image overlay URL when user switches ortho version
   useEffect(() => {
     if (!imageOverlayRef.current || selectedOrthoVersion == null) return;
@@ -851,6 +918,24 @@ export function PlotBoundaryPrep({ runId, onCancel }: PlotBoundaryPrepProps) {
     );
     imageOverlayRef.current.setUrl(url);
   }, [selectedOrthoVersion, runId]);
+
+  // Apply auto-boundary estimate to the map once both map and data are ready
+  useEffect(() => {
+    if (!mapInitialized || !autoBoundaryData?.available) return;
+    if (!autoBoundaryData.pop_boundary || !autoBoundaryData.grid_options) return;
+    if (popBoundary) return; // don't overwrite if boundary already exists
+    const popLayer = popLayerRef.current;
+    const map = mapRef.current;
+    if (!popLayer || !map) return;
+
+    L.geoJSON(autoBoundaryData.pop_boundary as GeoJSON.GeoJsonObject, {
+      style: { color: "#f59e0b", weight: 2, fillOpacity: 0.1 },
+    }).eachLayer((l) => popLayer.addLayer(l));
+
+    setPopBoundary(autoBoundaryData.pop_boundary);
+    setHasBoundary(true);
+    setGridOptions(autoBoundaryData.grid_options);
+  }, [mapInitialized, autoBoundaryData]);
 
   // Destroy map only on component unmount — separate from the init effect so that
   // orthoInfo refetches (triggered by save/invalidate) don't tear down the map mid-session.
@@ -893,7 +978,8 @@ export function PlotBoundaryPrep({ runId, onCancel }: PlotBoundaryPrepProps) {
         {
           attribution:
             "Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics",
-          maxZoom: 19,
+          maxNativeZoom: 19,
+          maxZoom: 22,
           opacity: 0.6,
         }
       ).addTo(map);
@@ -935,11 +1021,9 @@ export function PlotBoundaryPrep({ runId, onCancel }: PlotBoundaryPrepProps) {
         setLoadedGeojson(orthoInfo.existing_geojson);
         setPreviewGeoJson(orthoInfo.existing_geojson);
         if (orthoInfo.existing_grid_settings) {
-          // Full settings saved — restore everything
           setGridOptions(orthoInfo.existing_grid_settings.options);
           setGridOffset(orthoInfo.existing_grid_settings.offset);
         } else {
-          // Older save without stored settings — derive all options from feature geometry
           const features = orthoInfo.existing_geojson.features;
           if (features.length > 0) {
             const maxRow = Math.max(
@@ -961,7 +1045,7 @@ export function PlotBoundaryPrep({ runId, onCancel }: PlotBoundaryPrepProps) {
         }
       }
 
-      // Geoman: only allow drawing ONE polygon (population boundary)
+      // Geoman: allow drawing ONE polygon (population boundary)
       const mapAny = map as any;
       if (mapAny.pm) {
         mapAny.pm.addControls({
@@ -1006,6 +1090,8 @@ export function PlotBoundaryPrep({ runId, onCancel }: PlotBoundaryPrepProps) {
                 .features[0]
         );
       }
+
+      setMapInitialized(true);
     }); // end import().then()
 
     return () => {
@@ -1066,9 +1152,10 @@ export function PlotBoundaryPrep({ runId, onCancel }: PlotBoundaryPrepProps) {
 
     previewGeoJson.features.forEach((feature, idx) => {
       const p = feature.properties || {};
+      const plotLabel = p.plot ?? p.plot_id ?? (p.row != null ? `${p.row}_${p.column}` : "?");
       const lines = [
-        `<strong>Plot ${p.plot ?? `${p.row}_${p.column}`}</strong>`,
-        `Row: ${p.row} &nbsp; Col: ${p.column}`,
+        `<strong>Plot ${plotLabel}</strong>`,
+        p.row != null ? `Row: ${p.row} &nbsp; Col: ${p.column}` : null,
         p.accession ? `Accession: ${p.accession}` : null,
       ]
         .filter(Boolean)
@@ -1138,7 +1225,7 @@ export function PlotBoundaryPrep({ runId, onCancel }: PlotBoundaryPrepProps) {
             lon: prev.lon + lon,
             lat: prev.lat + lat,
           }));
-          setLoadedGeojson(null); // user is dragging — switch to compute mode
+          setLoadedGeojson(null); // switch to compute mode
         });
       }
     }
@@ -1264,7 +1351,42 @@ export function PlotBoundaryPrep({ runId, onCancel }: PlotBoundaryPrepProps) {
     };
   }, [interactionMode]);
 
-  // Explicit user-triggered option change — clears loadedGeojson to switch to compute mode
+  // Load a specific plot boundary version and make it the editing base
+  async function loadBoundaryVersion(version: number) {
+    try {
+      const res = await fetch(
+        apiUrl(`/api/v1/pipeline-runs/${runId}/plot-boundaries/${version}`),
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+          },
+        }
+      );
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      const fc = data.geojson as GeoJSON.FeatureCollection;
+      setLoadedGeojson(fc);
+      setPreviewGeoJson(fc);
+      if (data.grid_settings) {
+        setGridOptions(data.grid_settings.options);
+        setGridOffset(data.grid_settings.offset ?? { lon: 0, lat: 0 });
+      } else {
+        const features = fc.features;
+        if (features.length > 0) {
+          const maxRow = Math.max(...features.map((f: any) => f.properties?.row ?? 1));
+          const maxCol = Math.max(...features.map((f: any) => f.properties?.column ?? 1));
+          const derived = deriveGridOptionsFromGeojson(fc);
+          setGridOptions((prev) => ({ ...prev, rows: maxRow, columns: maxCol, ...derived }));
+          setGridOffset({ lon: 0, lat: 0 });
+        }
+      }
+      setSelectedBoundaryVersion(version);
+    } catch {
+      showErrorToast("Failed to load boundary version");
+    }
+  }
+
+  // Explicit user-triggered option change — clears loadedGeojson to switch to compute mode (aerial only)
   function handleGridOptionsChange(opts: GridOptions) {
     setLoadedGeojson(null);
     setGridOptions(opts);
@@ -1276,7 +1398,8 @@ export function PlotBoundaryPrep({ runId, onCancel }: PlotBoundaryPrepProps) {
   }
 
   async function handleSave(saveAs = false, name?: string) {
-    if (!previewGeoJson || !popBoundary) return;
+    if (!previewGeoJson) return;
+    if (!popBoundary) return;
     setIsSaving(true);
     if (saveAs) setPendingSaveAs(true);
     try {
@@ -1294,6 +1417,7 @@ export function PlotBoundaryPrep({ runId, onCancel }: PlotBoundaryPrepProps) {
             grid_options: gridOptions,
             grid_offset: gridOffset,
             ortho_version: selectedOrthoVersion,
+            stitch_version: selectedStitchVersion,
             save_as: saveAs,
             name: name || null,
           }),
@@ -1307,6 +1431,7 @@ export function PlotBoundaryPrep({ runId, onCancel }: PlotBoundaryPrepProps) {
       showSuccessToast(
         saveAs ? "Saved as new version" : "Plot boundaries saved"
       );
+      if (saveAs) onSaved?.();
     } catch {
       showErrorToast("Failed to save grid");
     } finally {
@@ -1376,27 +1501,24 @@ export function PlotBoundaryPrep({ runId, onCancel }: PlotBoundaryPrepProps) {
       <ol className="bg-muted/40 list-inside list-decimal space-y-1.5 rounded-md border px-4 py-3 text-sm">
         <li>
           Click the <strong>polygon icon</strong> (⬠) in the{" "}
-          <strong>top-left toolbar</strong> to start drawing.
-        </li>
-        <li>
-          Click around the outer edge of your field.{" "}
+          <strong>top-left toolbar</strong> to draw the outer field boundary.{" "}
           <strong>Double-click</strong> to finish.
         </li>
         <li>
-          The grid appears instantly — adjust dimensions in the{" "}
-          <strong>Plot Grid Settings</strong> panel (bottom-left).
+          Adjust plot dimensions in the <strong>Plot Settings</strong> panel
+          (bottom-left). The grid updates in real-time.
         </li>
         <li>
-          Use <strong>Move Grid</strong> mode to drag the grid into position.
+          Use <strong>Move</strong> mode to drag the grid into position, or
+          adjust the <strong>Angle</strong>.
         </li>
         <li>
           In <strong>Select</strong> mode: <strong>click</strong> a plot to
           select it, <strong>Shift+click</strong> to add/remove, or{" "}
-          <strong>drag</strong> a rectangle to multi-select. Red = selected.
-          Hover for tooltip.
+          <strong>drag</strong> a rectangle to multi-select.
         </li>
         <li>
-          Click <strong>Done — Save &amp; Close</strong> when satisfied.
+          Click <strong>Done</strong> to save and close.
         </li>
       </ol>
 
@@ -1430,9 +1552,24 @@ export function PlotBoundaryPrep({ runId, onCancel }: PlotBoundaryPrepProps) {
             field boundary
           </div>
         )}
-        {/* Ortho version selector — top-right corner of the map */}
-        {orthoInfo.ortho_versions && orthoInfo.ortho_versions.length > 0 && (
-          <div className="absolute top-2 right-2 z-[1000]">
+        {/* Top-right: stacked version selectors */}
+        <div className="absolute top-2 right-2 z-[1000] flex flex-col gap-1">
+          {/* Stitch version selector (ground only) */}
+          {pipelineType === "ground" && orthoInfo.stitch_versions && orthoInfo.stitch_versions.length > 0 && (
+            <select
+              value={selectedStitchVersion ?? ""}
+              onChange={(e) => setSelectedStitchVersion(Number(e.target.value))}
+              className="border-input bg-background/90 rounded border px-1.5 py-1 text-xs shadow focus:outline-none"
+            >
+              {orthoInfo.stitch_versions.map((v) => (
+                <option key={v.version} value={v.version}>
+                  Stitching: {v.name ? `${v.name} (v${v.version})` : `v${v.version}`}
+                </option>
+              ))}
+            </select>
+          )}
+          {/* Ortho version selector (aerial only) */}
+          {pipelineType === "aerial" && orthoInfo.ortho_versions && orthoInfo.ortho_versions.length > 0 && (
             <select
               value={selectedOrthoVersion ?? ""}
               onChange={(e) => setSelectedOrthoVersion(Number(e.target.value))}
@@ -1440,12 +1577,26 @@ export function PlotBoundaryPrep({ runId, onCancel }: PlotBoundaryPrepProps) {
             >
               {orthoInfo.ortho_versions.map((v) => (
                 <option key={v.version} value={v.version}>
-                  {v.name ? `${v.name} (v${v.version})` : `v${v.version}`}
+                  Orthomosaic: {v.name ? `${v.name} (v${v.version})` : `v${v.version}`}
                 </option>
               ))}
             </select>
-          </div>
-        )}
+          )}
+          {/* Boundary version selector */}
+          {orthoInfo.plot_boundary_versions && orthoInfo.plot_boundary_versions.length > 1 && (
+            <select
+              value={selectedBoundaryVersion ?? ""}
+              onChange={(e) => loadBoundaryVersion(Number(e.target.value))}
+              className="border-input bg-background/90 rounded border px-1.5 py-1 text-xs shadow focus:outline-none"
+            >
+              {orthoInfo.plot_boundary_versions.map((v) => (
+                <option key={v.version} value={v.version}>
+                  Boundary: {v.name ? `${v.name} (v${v.version})` : `v${v.version}`}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
       </div>
 
       {/* Footer */}

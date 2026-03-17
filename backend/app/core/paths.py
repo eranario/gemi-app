@@ -24,13 +24,15 @@ Directory layout
       {sensor}/    ← drone images uploaded here
   Intermediate/
     {workspace_name}/
-      {experiment}/{location}/{population}/          ← pipeline-level artifacts
+      {year}/{experiment}/{location}/{population}/   ← year-level artifacts (matches Raw layout)
         plot_borders.csv
         plot_borders_v{N}.csv
         Plot-Boundary-WGS84.geojson
         Plot-Boundary-WGS84_v{N}.geojson
         stitch_mask.json
-        gcp_locations.csv  (also lives in Raw at population level)
+        gcp_locations.csv
+        field_design.csv
+        Pop-Boundary-WGS84.geojson
         {date}/{platform}/{sensor}/                  ← run-level artifacts
           msgs_synced.csv
           gcp_list.txt
@@ -127,38 +129,50 @@ class RunPaths:
         """gcp_locations.csv at the population level in Raw/ (shared across dates)."""
         return self.data_root / "Raw" / self._year / self._pop_seg / "gcp_locations.csv"
 
-    # ── Intermediate: pipeline-level (reused across runs) ─────────────────
+    # ── Intermediate: pipeline-level (workspace + population, no year) ────
+    # NOTE: kept for backward-compat with make_dirs only; prefer intermediate_year
 
     @property
     def intermediate_pipeline(self) -> Path:
-        """Intermediate/{workspace}/{experiment}/{location}/{population}/"""
+        """Intermediate/{workspace}/{experiment}/{location}/{population}/
+        (Legacy — no year prefix.  Use intermediate_year for year-scoped artifacts.)
+        """
         return self.data_root / "Intermediate" / self.workspace_name / self._pop_seg
+
+    # ── Intermediate: year-level (shared across runs within a year) ────────
+
+    @property
+    def intermediate_year(self) -> Path:
+        """Intermediate/{workspace}/{year}/{experiment}/{location}/{population}/
+        Matches Raw layout: year is immediately under the workspace prefix.
+        """
+        return self.data_root / "Intermediate" / self.workspace_name / self._year / self._pop_seg
 
     @property
     def plot_borders(self) -> Path:
-        """Ground: plot_borders.csv — reused across runs for this pipeline."""
-        return self.intermediate_pipeline / "plot_borders.csv"
+        """Ground: plot_borders.csv — year-specific, reused across runs within a year."""
+        return self.intermediate_year / "plot_borders.csv"
 
     def plot_borders_versioned(self, version: int) -> Path:
-        return self.intermediate_pipeline / f"plot_borders_v{version}.csv"
+        return self.intermediate_year / f"plot_borders_v{version}.csv"
 
     @property
     def stitch_mask(self) -> Path:
-        """Ground: stitch_mask.json — pipeline-level config."""
-        return self.intermediate_pipeline / "stitch_mask.json"
+        """Ground: stitch_mask.json — year-specific config."""
+        return self.intermediate_year / "stitch_mask.json"
 
     @property
     def plot_boundary_geojson(self) -> Path:
-        """Aerial: Plot-Boundary-WGS84.geojson — reused across runs."""
-        return self.intermediate_pipeline / "Plot-Boundary-WGS84.geojson"
+        """Aerial/Ground: Plot-Boundary-WGS84.geojson — year-specific."""
+        return self.intermediate_year / "Plot-Boundary-WGS84.geojson"
 
     def plot_boundary_geojson_versioned(self, version: int) -> Path:
-        return self.intermediate_pipeline / f"Plot-Boundary-WGS84_v{version}.geojson"
+        return self.intermediate_year / f"Plot-Boundary-WGS84_v{version}.geojson"
 
     @property
     def field_design_dir(self) -> Path:
-        """Raw/.../FieldDesign/ — field design CSVs uploaded via Files tab (no date/platform)."""
-        return self.data_root / "Raw" / self._pop_seg / "FieldDesign"
+        """Raw/{year}/.../FieldDesign/ — field design CSVs uploaded via Files tab."""
+        return self.data_root / "Raw" / self._year / self._pop_seg / "FieldDesign"
 
     def field_design_csv(self) -> Path | None:
         """
@@ -175,18 +189,18 @@ class RunPaths:
 
     @property
     def field_design_intermediate(self) -> Path:
-        """Inline field_design.csv saved during plot boundary prep (if not uploaded via Raw)."""
-        return self.intermediate_pipeline / "field_design.csv"
+        """Inline field_design.csv saved during plot boundary prep (year-specific)."""
+        return self.intermediate_year / "field_design.csv"
 
     @property
     def pop_boundary_geojson(self) -> Path:
-        """Population (outer field) boundary — pipeline level, shared across runs."""
-        return self.intermediate_pipeline / "Pop-Boundary-WGS84.geojson"
+        """Population (outer field) boundary — year-specific."""
+        return self.intermediate_year / "Pop-Boundary-WGS84.geojson"
 
     @property
     def gcp_locations_intermediate(self) -> Path:
-        """Inline gcp_locations.csv saved during GCP picker step (if not uploaded via Raw)."""
-        return self.intermediate_pipeline / "gcp_locations.csv"
+        """Inline gcp_locations.csv — year-specific (field layout may change per year)."""
+        return self.intermediate_year / "gcp_locations.csv"
 
     def gcp_locations(self) -> Path:
         """
@@ -200,8 +214,8 @@ class RunPaths:
 
     @property
     def intermediate_run(self) -> Path:
-        """Intermediate/{workspace}/{experiment}/{location}/{population}/{date}/{platform}/{sensor}/"""
-        return self.intermediate_pipeline / self._run_seg
+        """Intermediate/{workspace}/{year}/{experiment}/{location}/{population}/{date}/{platform}/{sensor}/"""
+        return self.intermediate_year / self._run_seg
 
     @property
     def msgs_synced(self) -> Path:
@@ -279,8 +293,12 @@ class RunPaths:
 
     @property
     def cropped_images_dir(self) -> Path:
-        """Aerial: cropped_images/ directory."""
+        """Aerial: cropped_images/ directory (latest, for backward compat)."""
         return self.processed_run / "cropped_images"
+
+    def cropped_images_versioned(self, version: int) -> Path:
+        """Aerial: per-trait-record versioned crop directory (cropped_images_v{N}/)."""
+        return self.processed_run / f"cropped_images_v{version}"
 
     @property
     def traits_geojson(self) -> Path:
@@ -308,7 +326,7 @@ class RunPaths:
 
     def make_dirs(self) -> None:
         """Create all necessary directories for this run."""
-        self.intermediate_pipeline.mkdir(parents=True, exist_ok=True)
+        self.intermediate_year.mkdir(parents=True, exist_ok=True)
         self.intermediate_run.mkdir(parents=True, exist_ok=True)
         self.processed_run.mkdir(parents=True, exist_ok=True)
 

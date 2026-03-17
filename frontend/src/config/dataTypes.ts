@@ -88,10 +88,11 @@ export const dataTypes = {
     ],
   },
   "Field Design": {
-    fields: ["experiment", "location", "population"],
+    fields: ["experiment", "location", "population", "date"],
     fileType: ".csv",
     directory: [
       "Raw",
+      "Year",
       "Experiment",
       "Location",
       "Population",

@@ -111,9 +111,15 @@ class ExecuteStepRequest(BaseModel):
     stitch_name: str | None = None
     # Orthomosaic run name (aerial only, optional)
     ortho_name: str | None = None
-    # Trait extraction version overrides (aerial only, optional)
+    # Trait extraction / association version overrides
     ortho_version: int | None = None
     boundary_version: int | None = None
+    stitch_version: int | None = None
+    association_version: int | None = None
+    trait_version: int | None = None
+    # Inference mode
+    inference_mode: str = "cloud"
+    local_server_url: str | None = None
 
 
 @router.post("/pipeline-runs/{id}/execute-step")
@@ -148,12 +154,19 @@ def execute_step(
             ),
             "associate_boundaries": (
                 plot_boundary.run_associate_boundaries,
-                {},
+                {
+                    "stitch_version": body.stitch_version,
+                    "boundary_version": body.boundary_version,
+                },
             ),
             "inference": (
                 ground.run_inference,
                 {
                     "models": [m.model_dump() for m in body.models],
+                    "stitch_version": body.stitch_version,
+                    "association_version": body.association_version,
+                    "inference_mode": body.inference_mode,
+                    "local_server_url": body.local_server_url,
                 },
             ),
         }
@@ -187,6 +200,9 @@ def execute_step(
                 aerial.run_inference,
                 {
                     "models": [m.model_dump() for m in body.models],
+                    "trait_version": body.trait_version,
+                    "inference_mode": body.inference_mode,
+                    "local_server_url": body.local_server_url,
                 },
             ),
         }
@@ -568,7 +584,7 @@ def save_field_design(
     """Save field design CSV inline (without going to the Files tab)."""
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
-    paths.intermediate_pipeline.mkdir(parents=True, exist_ok=True)
+    paths.intermediate_year.mkdir(parents=True, exist_ok=True)
     paths.field_design_intermediate.write_text(body.csv_text)
 
     import csv as _csv
@@ -594,10 +610,11 @@ class GeneratePlotGridRequest(BaseModel):
 
 class SavePlotGridRequest(BaseModel):
     geojson: dict[str, Any]        # pre-computed GeoJSON FeatureCollection
-    pop_boundary: dict[str, Any]   # GeoJSON Feature (for saving Pop-Boundary file)
+    pop_boundary: dict[str, Any] | None = None   # GeoJSON Feature (for saving Pop-Boundary file)
     grid_options: dict[str, Any] | None = None   # GridOptions (width, length, rows, …)
     grid_offset: dict[str, Any] | None = None    # { lon, lat } drag offset
-    ortho_version: int | None = None  # which ortho version was used as the background
+    ortho_version: int | None = None    # aerial: which ortho version was used as background
+    stitch_version: int | None = None   # ground: which stitch version was used as background
     save_as: bool = False     # True → always create new version; False → overwrite active or create v1
     name: str | None = None   # optional name for the new version (only used when save_as=True)
 
@@ -615,9 +632,10 @@ def save_plot_grid(
 
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
-    paths.intermediate_pipeline.mkdir(parents=True, exist_ok=True)
+    paths.intermediate_year.mkdir(parents=True, exist_ok=True)
 
-    paths.pop_boundary_geojson.write_text(json.dumps(body.pop_boundary, indent=2))
+    if body.pop_boundary is not None:
+        paths.pop_boundary_geojson.write_text(json.dumps(body.pop_boundary, indent=2))
 
     # Embed grid_settings as a non-standard top-level key so options are restored on re-open
     geojson_to_save = dict(body.geojson)
@@ -641,6 +659,7 @@ def save_plot_grid(
             "name": body.name.strip() if body.name else None,
             "geojson_path": paths.rel(versioned_path),
             "ortho_version": body.ortho_version,
+            "stitch_version": body.stitch_version,
             "created_at": now,
         }
         versions.append(entry)
@@ -653,6 +672,7 @@ def save_plot_grid(
             versioned_path = paths.abs(target["geojson_path"])
             versioned_path.write_text(json.dumps(geojson_to_save, indent=2))
             target["ortho_version"] = body.ortho_version
+            target["stitch_version"] = body.stitch_version
 
     # Always write canonical file for backward compat (trait extraction uses it)
     paths.plot_boundary_geojson.write_text(json.dumps(geojson_to_save, indent=2))
@@ -690,7 +710,7 @@ def generate_plot_grid(
     """
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
-    paths.intermediate_pipeline.mkdir(parents=True, exist_ok=True)
+    paths.intermediate_year.mkdir(parents=True, exist_ok=True)
 
     # Save population boundary
     paths.pop_boundary_geojson.write_text(json.dumps(body.pop_boundary, indent=2))
@@ -1033,7 +1053,7 @@ def save_gcp_locations(
         raise HTTPException(status_code=400, detail="Not an aerial pipeline")
 
     paths = _get_paths(session, run)
-    paths.intermediate_pipeline.mkdir(parents=True, exist_ok=True)
+    paths.intermediate_year.mkdir(parents=True, exist_ok=True)
     paths.gcp_locations_intermediate.write_text(body.csv_text)
     logger.info("Saved inline gcp_locations.csv for run %s", id)
 
@@ -1331,19 +1351,16 @@ def orthomosaic_info(
 
         bounds = _read_tif_bounds(tif)
 
-        # Load existing plot_boundaries.geojson (georeferenced plot footprints)
+        # Load canonical Plot-Boundary-WGS84.geojson (saved by save-plot-grid endpoint)
         existing_geojson = None
         existing_grid_settings = None
-        geo_json_rel = (run.outputs or {}).get("plot_boundaries_geojson")
-        if geo_json_rel:
-            geo_json_path = paths.abs(geo_json_rel)
-            if geo_json_path.exists():
-                try:
-                    raw = json.loads(geo_json_path.read_text())
-                    existing_grid_settings = raw.pop("grid_settings", None)
-                    existing_geojson = raw
-                except Exception:
-                    pass
+        if paths.plot_boundary_geojson.exists():
+            try:
+                raw = json.loads(paths.plot_boundary_geojson.read_text())
+                existing_grid_settings = raw.pop("grid_settings", None)
+                existing_geojson = raw
+            except Exception:
+                pass
 
         # Load existing pop boundary if present
         existing_pop = None
@@ -1353,6 +1370,22 @@ def orthomosaic_info(
             except Exception:
                 pass
 
+        _outputs = run.outputs or {}
+        _pb_versions = _outputs.get("plot_boundaries", [])
+        _active_pbv = _outputs.get("active_plot_boundary_version")
+
+        # Stitching versions that have a combined_mosaic.tif
+        _stitchings = list(_outputs.get("stitchings", []))
+        if not _stitchings and _outputs.get("stitching_version"):
+            _stitchings = [{"version": int(_outputs["stitching_version"]), "name": None}]
+        _stitch_versions = []
+        for _s in _stitchings:
+            if (paths.agrowstitch_dir(_s["version"]) / "combined_mosaic.tif").exists():
+                _stitch_versions.append({"version": _s["version"], "name": _s.get("name")})
+        _active_sv = int(_outputs["stitching_version"]) if _outputs.get("stitching_version") else (
+            _stitch_versions[-1]["version"] if _stitch_versions else None
+        )
+
         return {
             "available": True,
             "path": str(tif),
@@ -1360,6 +1393,13 @@ def orthomosaic_info(
             "existing_geojson": existing_geojson,
             "existing_pop_boundary": existing_pop,
             "existing_grid_settings": existing_grid_settings,
+            "plot_boundary_versions": [
+                {"version": v["version"], "name": v.get("name"), "created_at": v.get("created_at")}
+                for v in sorted(_pb_versions, key=lambda x: x["version"])
+            ],
+            "active_plot_boundary_version": _active_pbv,
+            "stitch_versions": _stitch_versions,
+            "active_stitch_version": _active_sv,
         }
 
     else:
@@ -1390,6 +1430,8 @@ def orthomosaic_info(
         _outputs = run.outputs or {}
         _versions = _get_ortho_versions(_outputs)
         _active_v = _outputs.get("active_ortho_version")
+        _pb_versions = _outputs.get("plot_boundaries", [])
+        _active_pbv = _outputs.get("active_plot_boundary_version")
 
         return {
             "available": True,
@@ -1404,7 +1446,270 @@ def orthomosaic_info(
                 {"version": v["version"], "name": v.get("name")}
                 for v in sorted(_versions, key=lambda x: x["version"])
             ],
+            "plot_boundary_versions": [
+                {"version": v["version"], "name": v.get("name"), "created_at": v.get("created_at")}
+                for v in sorted(_pb_versions, key=lambda x: x["version"])
+            ],
+            "active_plot_boundary_version": _active_pbv,
         }
+
+
+@router.get("/pipeline-runs/{id}/auto-boundary")
+def auto_boundary(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> dict[str, Any]:
+    """
+    Estimate outer field boundary and grid options from available spatial data.
+
+    Ground: derives boundary + grid from individual georeferenced plot TIF extents
+            and their spatial layout (precise — matches actual plot positions).
+    Aerial: derives boundary from the orthomosaic extent; derives plot dimensions
+            from (boundary size / rows×cols) using the field design if available.
+
+    Returns pop_boundary (GeoJSON Feature) and grid_options.
+    """
+    import math as _math
+
+    run = _get_run_or_404(session, id)
+    pipeline = session.get(Pipeline, run.pipeline_id)
+    paths = _get_paths(session, run)
+
+    # ── Aerial path ───────────────────────────────────────────────────────────
+    if pipeline and pipeline.type == "aerial":
+        tif = _get_active_ortho_tif(paths, run.outputs or {})
+        if not tif:
+            return {"available": False}
+        bounds = _read_tif_bounds(tif)
+        if not bounds:
+            return {"available": False}
+
+        south, west = bounds[0]
+        north, east = bounds[1]
+        avg_lat = (south + north) / 2
+        meters_per_deg = 111_320 * _math.cos(_math.radians(avg_lat))
+        field_w_m = (east - west) * meters_per_deg
+        field_h_m = (north - south) * meters_per_deg
+
+        # Rows/cols from field design if available
+        n_rows, n_cols = 1, 1
+        fd_path = paths.field_design_csv()
+        if fd_path:
+            import csv as _csv
+            try:
+                rows_data: list[dict[str, str]] = []
+                with open(fd_path, newline="") as fh:
+                    for row in _csv.DictReader(fh):
+                        rows_data.append({k.strip(): v.strip() for k, v in row.items()})
+                row_nums = {int(r["row"]) for r in rows_data if r.get("row", "").isdigit()}
+                col_nums = {int(r["col"]) for r in rows_data if r.get("col", "").isdigit()}
+                if row_nums:
+                    n_rows = max(row_nums)
+                if col_nums:
+                    n_cols = max(col_nums)
+            except Exception:
+                pass
+
+        plot_width_m  = round(field_w_m / n_cols, 2)
+        plot_length_m = round(field_h_m / n_rows, 2)
+
+        # Pop boundary: 95% of orthomosaic extent (trims edge artefacts)
+        shrink_lon = (east - west)  * 0.025
+        shrink_lat = (north - south) * 0.025
+        pop_boundary = {
+            "type": "Feature",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[
+                    [west  + shrink_lon, south + shrink_lat],
+                    [east  - shrink_lon, south + shrink_lat],
+                    [east  - shrink_lon, north - shrink_lat],
+                    [west  + shrink_lon, north - shrink_lat],
+                    [west  + shrink_lon, south + shrink_lat],
+                ]],
+            },
+            "properties": {},
+        }
+        return {
+            "available": True,
+            "pop_boundary": pop_boundary,
+            "grid_options": {
+                "width": plot_width_m,
+                "length": plot_length_m,
+                "rows": n_rows,
+                "columns": n_cols,
+                "verticalSpacing": 0.0,
+                "horizontalSpacing": 0.0,
+                "angle": 0.0,
+            },
+        }
+
+    # ── Ground path ───────────────────────────────────────────────────────────
+    stitch_version = int((run.outputs or {}).get("stitching_version", 1))
+    stitch_dir = paths.agrowstitch_dir(stitch_version)
+
+    if not stitch_dir.exists():
+        return {"available": False}
+
+    utm_tifs = sorted(stitch_dir.glob("georeferenced_plot_*_utm.tif"))
+    if not utm_tifs:
+        return {"available": False}
+
+    try:
+        import rasterio
+        from rasterio.crs import CRS
+        from rasterio.warp import transform_bounds  # noqa: F811
+    except ImportError:
+        return {"available": False}
+
+    wgs84 = CRS.from_epsg(4326)
+    plot_boxes: list[dict[str, Any]] = []
+
+    for tif_path in utm_tifs:
+        try:
+            with rasterio.open(tif_path) as src:
+                left, bottom, right, top = transform_bounds(
+                    src.crs, wgs84,
+                    src.bounds.left, src.bounds.bottom,
+                    src.bounds.right, src.bounds.top,
+                )
+                plot_boxes.append({
+                    "west": left, "south": bottom, "east": right, "north": top,
+                    "cx": (left + right) / 2,
+                    "cy": (top + bottom) / 2,
+                    "width_deg": right - left,
+                    "height_deg": top - bottom,
+                })
+        except Exception as exc:
+            logger.warning("auto_boundary: could not read %s: %s", tif_path.name, exc)
+
+    if not plot_boxes:
+        return {"available": False}
+
+    avg_lat = sum(b["cy"] for b in plot_boxes) / len(plot_boxes)
+    meters_per_deg = 111_320 * _math.cos(_math.radians(avg_lat))
+
+    avg_width_deg  = sum(b["width_deg"]  for b in plot_boxes) / len(plot_boxes)
+    avg_height_deg = sum(b["height_deg"] for b in plot_boxes) / len(plot_boxes)
+    plot_width_m  = round(avg_width_deg  * meters_per_deg, 2)
+    plot_length_m = round(avg_height_deg * meters_per_deg, 2)
+
+    # Cluster centroids into rows by latitude (top-first)
+    sorted_by_lat = sorted(plot_boxes, key=lambda b: -b["cy"])
+    lat_threshold = avg_height_deg * 0.5
+    row_clusters: list[list[dict]] = []
+    for box in sorted_by_lat:
+        placed = False
+        for cluster in row_clusters:
+            cluster_mean_lat = sum(b["cy"] for b in cluster) / len(cluster)
+            if abs(box["cy"] - cluster_mean_lat) < lat_threshold:
+                cluster.append(box)
+                placed = True
+                break
+        if not placed:
+            row_clusters.append([box])
+
+    n_rows = len(row_clusters)
+    n_cols = max(len(c) for c in row_clusters) if row_clusters else 1
+
+    # Vertical spacing (row centre-to-centre gap minus plot height)
+    v_spacing_m = 0.0
+    if n_rows > 1:
+        row_means = sorted(
+            [sum(b["cy"] for b in c) / len(c) for c in row_clusters],
+            reverse=True,
+        )
+        gaps = [row_means[i] - row_means[i + 1] for i in range(len(row_means) - 1)]
+        avg_gap = sum(gaps) / len(gaps)
+        v_spacing_m = max(0.0, round((avg_gap - avg_height_deg) * meters_per_deg, 2))
+
+    # Horizontal spacing (column centre-to-centre gap minus plot width)
+    h_spacing_m = 0.0
+    if n_cols > 1:
+        spacings: list[float] = []
+        for cluster in row_clusters:
+            ordered = sorted(cluster, key=lambda b: b["cx"])
+            for i in range(len(ordered) - 1):
+                gap = ordered[i + 1]["cx"] - ordered[i]["cx"] - avg_width_deg
+                spacings.append(gap * meters_per_deg)
+        if spacings:
+            h_spacing_m = max(0.0, round(sum(spacings) / len(spacings), 2))
+
+    # Angle: direction along the widest row
+    angle_deg = 0.0
+    widest = max(row_clusters, key=len)
+    if len(widest) > 1:
+        ordered = sorted(widest, key=lambda b: b["cx"])
+        dx = ordered[-1]["cx"] - ordered[0]["cx"]
+        dy = ordered[-1]["cy"] - ordered[0]["cy"]
+        angle_deg = round(_math.degrees(_math.atan2(dy, dx)), 1)
+
+    # Outer boundary: bounding box of all TIF corners + 15% padding
+    all_west  = min(b["west"]  for b in plot_boxes)
+    all_south = min(b["south"] for b in plot_boxes)
+    all_east  = max(b["east"]  for b in plot_boxes)
+    all_north = max(b["north"] for b in plot_boxes)
+    pad = avg_width_deg * 0.15
+    pop_boundary = {
+        "type": "Feature",
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [[
+                [all_west - pad, all_south - pad],
+                [all_east + pad, all_south - pad],
+                [all_east + pad, all_north + pad],
+                [all_west - pad, all_north + pad],
+                [all_west - pad, all_south - pad],
+            ]],
+        },
+        "properties": {},
+    }
+
+    return {
+        "available": True,
+        "pop_boundary": pop_boundary,
+        "grid_options": {
+            "width": plot_width_m,
+            "length": plot_length_m,
+            "rows": n_rows,
+            "columns": n_cols,
+            "verticalSpacing": v_spacing_m,
+            "horizontalSpacing": h_spacing_m,
+            "angle": angle_deg,
+        },
+    }
+
+
+@router.get("/pipeline-runs/{id}/plot-boundaries/{version}")
+def get_plot_boundary_version(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    version: int,
+) -> dict[str, Any]:
+    """Return the GeoJSON for a specific saved plot boundary version."""
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+    versions = (run.outputs or {}).get("plot_boundaries", [])
+    entry = next((v for v in versions if v["version"] == version), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Plot boundary version {version} not found")
+    p = paths.abs(entry["geojson_path"])
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="Plot boundary file not found on disk")
+    try:
+        raw = json.loads(p.read_text())
+        grid_settings = raw.pop("grid_settings", None)
+        return {
+            "geojson": raw,
+            "grid_settings": grid_settings,
+            "version": version,
+            "name": entry.get("name"),
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # ── Mosaic preview (web-safe JPEG for Leaflet ImageOverlay) ──────────────────
@@ -1415,10 +1720,12 @@ def mosaic_preview(
     current_user: CurrentUser,
     id: uuid.UUID,
     max_size: int = 4096,
+    stitch_version: int | None = None,
 ):
     """
     Return the mosaic as a downscaled JPEG so WebKit can render it.
     TIF files are not renderable as <img> in WebKit/Tauri.
+    For ground runs, pass stitch_version to preview a specific stitching version.
     """
     import io
     import numpy as np
@@ -1433,10 +1740,13 @@ def mosaic_preview(
 
     # Resolve TIF path (same logic as orthomosaic_info)
     if pipeline and pipeline.type == "ground":
-        geo_rel = (run.outputs or {}).get("georeferencing")
-        if not geo_rel:
-            raise HTTPException(404, "No mosaic available")
-        tif = paths.abs(geo_rel) / "combined_mosaic.tif"
+        if stitch_version is not None:
+            tif = paths.agrowstitch_dir(stitch_version) / "combined_mosaic.tif"
+        else:
+            geo_rel = (run.outputs or {}).get("georeferencing")
+            if not geo_rel:
+                raise HTTPException(404, "No mosaic available")
+            tif = paths.abs(geo_rel) / "combined_mosaic.tif"
     else:
         tif = _get_active_ortho_tif(paths, run.outputs or {})
 
@@ -1935,6 +2245,7 @@ def inference_results(
         }
     """
     import csv as _csv
+    import json as _json
 
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
@@ -1945,12 +2256,16 @@ def inference_results(
     if not inference_out:
         return {"available": False, "models": [], "active_model": None, "predictions": [], "images": []}
 
-    # Support both old format (single path string) and new format (dict keyed by label)
+    # Support old format (str or dict) and new list format
     if isinstance(inference_out, str):
-        model_paths: dict[str, str] = {"Results": inference_out}
+        model_entries: list[dict] = [{"label": "Results", "csv_path": inference_out}]
+    elif isinstance(inference_out, list):
+        model_entries = inference_out
     else:
-        model_paths = dict(inference_out)
+        # Old dict format: {label: path}
+        model_entries = [{"label": lbl, "csv_path": rel} for lbl, rel in inference_out.items()]
 
+    model_paths: dict[str, str] = {e["label"]: e["csv_path"] for e in model_entries}
     available_models = list(model_paths.keys())
     active_model = model if model in model_paths else available_models[0]
     csv_path = paths.abs(model_paths[active_model])
@@ -1962,7 +2277,9 @@ def inference_results(
     with open(csv_path, newline="") as f:
         for row in _csv.DictReader(f):
             try:
-                rows.append({
+                points_raw = row.get("points", "") or ""
+                points = _json.loads(points_raw) if points_raw else []
+                entry: dict[str, Any] = {
                     "image": row.get("image", ""),
                     "class": row.get("class", ""),
                     "confidence": round(float(row.get("confidence", 0)), 4),
@@ -1970,15 +2287,26 @@ def inference_results(
                     "y": float(row.get("y", 0)),
                     "width": float(row.get("width", 0)),
                     "height": float(row.get("height", 0)),
-                })
+                }
+                if points:
+                    entry["points"] = points
+                rows.append(entry)
             except (ValueError, TypeError):
                 continue
 
     # Image list (absolute paths for /files/serve)
+    active_entry = next((e for e in model_entries if e.get("label") == active_model), None)
     if pipeline and pipeline.type == "aerial":
-        img_dir = paths.cropped_images_dir
+        tv = (active_entry or {}).get("trait_version") if isinstance(inference_out, list) else None
+        if tv is not None:
+            img_dir = paths.cropped_images_versioned(tv)
+            if not img_dir.exists():
+                img_dir = paths.cropped_images_dir
+        else:
+            img_dir = paths.cropped_images_dir
     else:
-        version = int(outputs.get("stitching_version", 1))
+        sv = (active_entry or {}).get("stitch_version") if isinstance(inference_out, list) else None
+        version = sv or int(outputs.get("stitching_version", 1))
         img_dir = paths.agrowstitch_dir(int(version))
 
     images: list[dict] = []
@@ -1992,6 +2320,113 @@ def inference_results(
         "active_model": active_model,
         "predictions": rows,
         "images": images,
+    }
+
+
+# ── Apply confidence threshold to traits GeoJSON ─────────────────────────────
+
+class ApplyThresholdRequest(BaseModel):
+    confidence_threshold: float  # 0.0 – 1.0
+    label: str | None = None     # which model label; None → apply all models
+
+
+@router.post("/pipeline-runs/{id}/apply-inference-threshold")
+def apply_inference_threshold(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    body: ApplyThresholdRequest,
+) -> dict[str, Any]:
+    """
+    Re-merge inference predictions into the Traits GeoJSON using a specific
+    confidence threshold, without re-running inference.
+
+    Reads the saved prediction CSV(s), filters rows by confidence, then
+    re-runs merge_inference_into_geojson so the GeoJSON reflects only
+    detections above the chosen threshold.
+    """
+    import csv as _csv
+    import json as _json
+    from app.processing.inference_utils import merge_inference_into_geojson
+    from app.models.pipeline import Pipeline as _Pipeline
+
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+    pipeline = session.get(_Pipeline, run.pipeline_id)
+    outputs = run.outputs or {}
+
+    inference_out = outputs.get("inference")
+    if not inference_out:
+        raise HTTPException(status_code=404, detail="No inference results found for this run.")
+
+    if isinstance(inference_out, str):
+        model_entries: list[dict] = [{"label": "Results", "csv_path": inference_out}]
+    elif isinstance(inference_out, list):
+        model_entries = inference_out
+    else:
+        model_entries = [{"label": lbl, "csv_path": rel} for lbl, rel in inference_out.items()]
+
+    # Filter to requested label(s)
+    if body.label:
+        model_entries = [e for e in model_entries if e.get("label") == body.label]
+        if not model_entries:
+            raise HTTPException(status_code=404, detail=f"No inference result for label '{body.label}'.")
+
+    # Determine Traits GeoJSON path and plot_id field based on pipeline type
+    is_aerial = pipeline and pipeline.type == "aerial"
+    if is_aerial:
+        plot_id_field = "plot_id"
+        feature_match_prop = "Plot"
+        traits_path = paths.traits_geojson
+    else:
+        plot_id_field = "plot_label"
+        feature_match_prop = "Plot"
+        traits_path = paths.traits_geojson
+
+    if not traits_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Traits GeoJSON not found. Complete the trait extraction (or plot boundary) step first.",
+        )
+
+    applied: list[str] = []
+    for entry in model_entries:
+        csv_rel = entry.get("csv_path", "")
+        label = entry.get("label", "model")
+        if not csv_rel:
+            continue
+        csv_path = paths.abs(csv_rel)
+        if not csv_path.exists():
+            logger.warning("apply_inference_threshold: CSV not found at %s", csv_path)
+            continue
+
+        rows: list[dict] = []
+        with open(csv_path, newline="") as f:
+            for row in _csv.DictReader(f):
+                try:
+                    conf = float(row.get("confidence", 0))
+                except (ValueError, TypeError):
+                    conf = 0.0
+                if conf >= body.confidence_threshold:
+                    rows.append(row)
+
+        merge_inference_into_geojson(
+            traits_path, rows,
+            model_label=label,
+            plot_id_field=plot_id_field,
+            feature_match_prop=feature_match_prop,
+        )
+        logger.info(
+            "apply_inference_threshold: label=%s threshold=%.2f → %d rows merged into %s",
+            label, body.confidence_threshold, len(rows), traits_path.name,
+        )
+        applied.append(label)
+
+    return {
+        "status": "ok",
+        "applied": applied,
+        "confidence_threshold": body.confidence_threshold,
+        "traits_geojson": str(paths.rel(traits_path)),
     }
 
 
@@ -2030,6 +2465,118 @@ def list_stitchings(
         result.append({**s, "plot_count": plot_count})
 
     return sorted(result, key=lambda s: s["version"], reverse=True)
+
+
+@router.get("/pipeline-runs/{id}/stitchings/{version}/download")
+def download_stitching_images(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    version: int,
+    association_version: int | None = None,
+) -> StreamingResponse:
+    """
+    Download all stitch plot images for a given version as a ZIP.
+
+    association_version selects which association CSV to use for naming.
+    If omitted, picks the latest association whose stitch_version matches,
+    falling back to the active association, then any association.
+
+    Naming:
+    - If association.csv exists and a plot is matched: plot-{Plot}_row-{Row}_col-{Col}_accession-{Accession}.png
+    - Otherwise: plot_{N}.png  (N = plot index from original filename)
+    """
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+
+    img_dir = paths.agrowstitch_dir(version)
+    if not img_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Stitching v{version} output directory not found")
+
+    pngs = sorted(img_dir.glob("full_res_mosaic_temp_plot_*.png"))
+    if not pngs:
+        pngs = sorted(img_dir.glob("*.png"))
+    if not pngs:
+        raise HTTPException(status_code=404, detail="No plot images found for this stitching version")
+
+    # Build plot_index → association row mapping
+    assoc_by_idx: dict[str, dict] = {}
+    outputs = run.outputs or {}
+    associations = outputs.get("associations", [])
+
+    if association_version is not None:
+        # Explicit version requested
+        active_assoc = next((a for a in associations if a["version"] == association_version), None)
+    else:
+        # Auto-select: latest association whose stitch_version matches this stitch version
+        matching = sorted(
+            [a for a in associations if a.get("stitch_version") == version],
+            key=lambda a: a["version"],
+        )
+        if matching:
+            active_assoc = matching[-1]
+        else:
+            # Fall back to active association version, then any
+            active_assoc_version = outputs.get("active_association_version")
+            active_assoc = next(
+                (a for a in associations if a["version"] == active_assoc_version),
+                associations[-1] if associations else None,
+            )
+    if active_assoc and active_assoc.get("association_path"):
+        assoc_path = paths.abs(active_assoc["association_path"])
+    else:
+        # Legacy fallback
+        assoc_path = paths.intermediate_run / "association.csv"
+    if assoc_path.exists():
+        with open(assoc_path, newline="") as f:
+            for row in csv.DictReader(f):
+                tif_name = row.get("plot_tif", "")
+                # Extract plot index from TIF name: "georeferenced_plot_3_utm.tif" → "3"
+                stem = Path(tif_name).stem  # "georeferenced_plot_3_utm"
+                parts = stem.split("_")
+                # Find the numeric part between "plot" and "utm"
+                plot_idx = None
+                for i, p in enumerate(parts):
+                    if p == "plot" and i + 1 < len(parts):
+                        candidate = parts[i + 1]
+                        if candidate.isdigit():
+                            plot_idx = candidate
+                            break
+                if plot_idx is not None:
+                    assoc_by_idx[plot_idx] = row
+
+    def _get_plot_idx_from_png(png: Path) -> str:
+        """Extract plot index from full_res_mosaic_temp_plot_{N}.png"""
+        stem = png.stem  # "full_res_mosaic_temp_plot_3"
+        parts = stem.split("_")
+        for i, p in enumerate(parts):
+            if p == "plot" and i + 1 < len(parts):
+                candidate = parts[i + 1]
+                if candidate.isdigit():
+                    return candidate
+        return stem
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for png in pngs:
+            idx = _get_plot_idx_from_png(png)
+            assoc = assoc_by_idx.get(idx)
+            if assoc and str(assoc.get("matched", "")).lower() in ("true", "1"):
+                plot_label = assoc.get("plot") or assoc.get("Plot") or idx
+                row_val = assoc.get("row") or assoc.get("Row") or ""
+                col_val = assoc.get("column") or assoc.get("col") or assoc.get("Col") or ""
+                accession = assoc.get("accession") or assoc.get("Accession") or ""
+                dest_name = f"plot-{plot_label}_row-{row_val}_col-{col_val}_accession-{accession}.png"
+            else:
+                dest_name = f"plot_{idx}.png"
+            zf.write(png, dest_name)
+
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=stitching_v{version}.zip"},
+    )
 
 
 class RenameStitchingRequest(BaseModel):
@@ -2107,6 +2654,61 @@ def delete_stitching(
     return {"ok": True}
 
 
+# ── Ground: association versions ─────────────────────────────────────────────
+
+@router.get("/pipeline-runs/{id}/associations")
+def list_associations(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> list[dict]:
+    """Return all association versions stored in run.outputs['associations']."""
+    run = _get_run_or_404(session, id)
+    associations = list((run.outputs or {}).get("associations", []))
+    return sorted(associations, key=lambda a: a["version"], reverse=True)
+
+
+@router.delete("/pipeline-runs/{id}/associations/{version}")
+def delete_association(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    version: int,
+) -> dict[str, Any]:
+    """Delete a specific association version and its CSV file."""
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+
+    existing = dict(run.outputs or {})
+    associations = list(existing.get("associations", []))
+    entry = next((a for a in associations if a["version"] == version), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Association v{version} not found")
+
+    # Delete the CSV file
+    rel_path = entry.get("association_path", "")
+    if rel_path:
+        abs_path = paths.abs(rel_path)
+        if abs_path.exists():
+            abs_path.unlink()
+
+    associations = [a for a in associations if a["version"] != version]
+    existing["associations"] = associations
+
+    # Update active version if we deleted it
+    active = int(existing.get("active_association_version", version))
+    if active == version:
+        remaining = sorted(associations, key=lambda a: a["version"])
+        existing["active_association_version"] = remaining[-1]["version"] if remaining else None
+
+    update_pipeline_run(
+        session=session,
+        db_run=run,
+        run_in=PipelineRunUpdate(outputs=existing),
+    )
+    return {"ok": True}
+
+
 # ── Ground: stitching outputs (live during run) ───────────────────────────────
 
 @router.get("/pipeline-runs/{id}/stitch-outputs")
@@ -2140,7 +2742,7 @@ def get_stitch_outputs(
 
 # ── Ground: inference results summary ────────────────────────────────────────
 
-@router.get("/pipeline-runs/{id}/inference-results")
+@router.get("/pipeline-runs/{id}/inference-summary")
 def get_inference_results(
     session: SessionDep,
     current_user: CurrentUser,
@@ -2149,42 +2751,62 @@ def get_inference_results(
     """
     Return a summary of each inference CSV stored in run.outputs["inference"].
 
-    Each entry: { label, plot_count, total_predictions, classes, csv_rel_path }
+    Handles both:
+    - New list format: [{ label, csv_path, stitch_version, association_version, created_at }]
+    - Legacy dict format: { label: rel_path }
+
+    Each returned entry includes: label, csv_rel_path, plot_count, total_predictions, classes,
+    stitch_version, association_version, created_at.
     """
     import csv as _csv_mod
 
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
-    inference_map: dict[str, str] = (run.outputs or {}).get("inference", {})
+    raw_inference = (run.outputs or {}).get("inference", [])
 
-    if not inference_map:
+    if not raw_inference:
         return []
 
+    # Normalise to list format
+    if isinstance(raw_inference, dict):
+        entries = [
+            {"label": lbl, "csv_path": rel, "stitch_version": None, "association_version": None, "created_at": None}
+            for lbl, rel in raw_inference.items()
+        ]
+    else:
+        entries = list(raw_inference)
+
     results = []
-    for label, rel_path in inference_map.items():
-        abs_path = paths.abs(rel_path)
-        entry: dict[str, Any] = {
+    for entry in entries:
+        label = entry.get("label", "")
+        rel_path = entry.get("csv_path") or entry.get("csv_rel_path", "")
+        abs_path = paths.abs(rel_path) if rel_path else None
+        result: dict[str, Any] = {
             "label": label,
             "csv_rel_path": rel_path,
+            "stitch_version": entry.get("stitch_version"),
+            "association_version": entry.get("association_version"),
+            "trait_version": entry.get("trait_version"),
+            "created_at": entry.get("created_at"),
             "plot_count": 0,
             "total_predictions": 0,
             "classes": {},
         }
-        if abs_path.exists():
+        if abs_path and abs_path.exists():
             try:
                 with open(abs_path, newline="") as f:
                     rows = list(_csv_mod.DictReader(f))
-                entry["total_predictions"] = len(rows)
-                entry["plot_count"] = len({r.get("image") for r in rows if r.get("image")})
+                result["total_predictions"] = len(rows)
+                result["plot_count"] = len({r.get("image") for r in rows if r.get("image")})
                 class_counts: dict[str, int] = {}
                 for r in rows:
                     cls = r.get("class", "")
                     if cls:
                         class_counts[cls] = class_counts.get(cls, 0) + 1
-                entry["classes"] = class_counts
+                result["classes"] = class_counts
             except Exception:
                 pass
-        results.append(entry)
+        results.append(result)
 
     return results
 
@@ -2196,26 +2818,38 @@ def delete_inference_result(
     id: uuid.UUID,
     label: str,
 ) -> dict[str, Any]:
-    """Delete the inference CSV and remove the entry from run.outputs."""
+    """Delete the inference CSV and remove the entry from run.outputs. Handles both list and legacy dict format."""
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
 
     existing_outputs = dict(run.outputs or {})
-    inference_map: dict[str, str] = dict(existing_outputs.get("inference", {}))
+    raw_inference = existing_outputs.get("inference", [])
 
-    if label not in inference_map:
+    # Normalise to list
+    if isinstance(raw_inference, dict):
+        inference_list = [
+            {"label": lbl, "csv_path": rel}
+            for lbl, rel in raw_inference.items()
+        ]
+    else:
+        inference_list = list(raw_inference)
+
+    entry = next((e for e in inference_list if e.get("label") == label), None)
+    if not entry:
         raise HTTPException(status_code=404, detail=f"No inference result for label '{label}'")
 
-    rel_path = inference_map.pop(label)
-    abs_path = paths.abs(rel_path)
-    if abs_path.exists():
-        abs_path.unlink()
+    rel_path = entry.get("csv_path") or entry.get("csv_rel_path", "")
+    if rel_path:
+        abs_path = paths.abs(rel_path)
+        if abs_path.exists():
+            abs_path.unlink()
 
-    if inference_map:
-        existing_outputs["inference"] = inference_map
+    inference_list = [e for e in inference_list if e.get("label") != label]
+
+    if inference_list:
+        existing_outputs["inference"] = inference_list
     else:
         existing_outputs.pop("inference", None)
-        # Also clear inference step completion if no results remain
         existing_steps = dict(run.steps_completed or {})
         existing_steps.pop("inference", None)
         update_pipeline_run(
