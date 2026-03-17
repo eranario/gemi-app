@@ -2122,7 +2122,7 @@ def get_stitch_outputs(
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
     outputs = run.outputs or {}
-    version = int(outputs.get("stitching_version", 1))
+    version = int(outputs.get("stitching_version") or 1)
     img_dir = paths.agrowstitch_dir(version)
 
     if not img_dir.exists():
@@ -2256,7 +2256,7 @@ def download_crops(
                 raise HTTPException(status_code=404, detail="No crop images found for this orthomosaic version")
         crop_dir = paths.cropped_images_dir
     else:
-        version = int((run.outputs or {}).get("stitching_version", 1))
+        version = int((run.outputs or {}).get("stitching_version") or 1)
         crop_dir = paths.agrowstitch_dir(version)
 
     # Check if pre-cropped images exist; if not, crop on-demand from the orthomosaic

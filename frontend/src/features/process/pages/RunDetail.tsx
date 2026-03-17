@@ -2227,6 +2227,10 @@ export function RunDetail() {
   // Gate on !runFetching so we never act on stale cached data from a previous
   // visit — we only register once the fresh DB value confirms the run is running.
   const autoRegisteredRunId = useRef<string | null>(null);
+  // Reset the guard whenever the run stops so a re-run can re-register.
+  useEffect(() => {
+    if (!isRunning) autoRegisteredRunId.current = null;
+  }, [isRunning]);
   useEffect(() => {
     if (!isRunning || !run || !pipeline || runFetching) return;
     if (autoRegisteredRunId.current === runId) return;

@@ -90,7 +90,7 @@ function ProcessItem({
           {process.message}
         </p>
       )}
-      {process.status !== "error" && (
+      {!isDone && (
         <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-secondary">
           <div
             className="h-full rounded-full bg-primary transition-[width] duration-300"

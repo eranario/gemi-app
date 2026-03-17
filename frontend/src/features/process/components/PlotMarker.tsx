@@ -311,7 +311,8 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
   const addPlot = useCallback(() => {
     setPlots((prev) => {
       const newId = prev.length + 1
-      const updated = [...prev, { plot_id: newId, start_image: null, end_image: null, direction: "down" }]
+      const prevDirection = prev[prev.length - 1]?.direction ?? "down"
+      const updated = [...prev, { plot_id: newId, start_image: null, end_image: null, direction: prevDirection }]
       setPlotPage(updated.length - 1)
       return updated
     })

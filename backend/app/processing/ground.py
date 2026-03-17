@@ -312,6 +312,13 @@ def run_stitching(
     else:
         cpu_count = max(1, (os.cpu_count() or 1) - 1)
 
+    # Stamp resolved pipeline settings onto base_config so stored_config reflects
+    # the actual values used (not whatever was in config.yaml).
+    # These will be overridden per-plot (direction) or at subprocess time (device),
+    # but we want the viewer to show the real pipeline-level settings.
+    base_config["device"] = agrowstitch_device
+    base_config["num_cpu"] = cpu_count
+
     emit(
         {
             "event": "progress",
@@ -629,11 +636,11 @@ def run_stitching(
             # Snapshot immediately before launch
             _emit_resources(emit)
 
-            # Monitor thread — polls every 0.5 s while the subprocess runs
+            # Monitor thread — polls every 5 min while the subprocess runs
             _res_stop = threading.Event()
 
             def _monitor_resources(_emit, _stop):
-                while not _stop.wait(5.0):
+                while not _stop.wait(300.0):
                     _emit_resources(_emit)
 
             vram_thread = threading.Thread(
@@ -835,7 +842,7 @@ def run_georeferencing(
 
     paths = _get_paths(session, run_id)
     run = session.get(PipelineRun, run_id)
-    agrowstitch_version = int((run.outputs or {}).get("stitching_version", 1))
+    agrowstitch_version = int((run.outputs or {}).get("stitching_version") or 1)
     out_dir = paths.agrowstitch_dir(agrowstitch_version)
 
     if not out_dir.exists():
@@ -905,8 +912,16 @@ def run_georeferencing(
             start_img = border.get("start_image", "")
             end_img = border.get("end_image", "")
             if start_img and end_img and rgb_col:
+                # rgb_col values may be full paths ("/top/rgb-123.jpg") while
+                # start/end images are plain basenames — normalise to basename
+                if "_basename" not in msgs_df.columns:
+                    msgs_df["_basename"] = msgs_df[rgb_col].apply(
+                        lambda v: str(v).split("/")[-1] if v and str(v) != "nan" else ""
+                    )
+                start_bn = start_img.split("/")[-1]
+                end_bn = end_img.split("/")[-1]
                 plot_df = msgs_df[
-                    (msgs_df[rgb_col] >= start_img) & (msgs_df[rgb_col] <= end_img)
+                    (msgs_df["_basename"] >= start_bn) & (msgs_df["_basename"] <= end_bn)
                 ].copy()
             else:
                 plot_df = msgs_df.copy()
@@ -985,7 +1000,7 @@ def run_inference(
 
     paths = _get_paths(session, run_id)
     run = session.get(PipelineRun, run_id)
-    agrowstitch_version = int((run.outputs or {}).get("stitching_version", 1))
+    agrowstitch_version = int((run.outputs or {}).get("stitching_version") or 1)
     out_dir = paths.agrowstitch_dir(agrowstitch_version)
 
     if not out_dir.exists():

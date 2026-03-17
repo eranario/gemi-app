@@ -105,6 +105,9 @@ export function ProcessProvider({ children }: { children: React.ReactNode }) {
         setProcesses((prev) =>
           prev.map((p) => {
             if (p.runId !== runId) return p
+            // Don't overwrite already-finished entries (e.g. a previous completed
+            // run sitting alongside a newly re-started run with the same runId)
+            if (p.status === "completed" || p.status === "error") return p
             if (evt.event === "complete") {
               return { ...p, status: "completed", progress: 100, message: "Done" }
             }
