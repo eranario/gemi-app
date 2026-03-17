@@ -9,7 +9,6 @@
  *   ← / →       previous / next image
  *   S           mark current image as Start for active plot
  *   E           mark current image as End for active plot
- *   1-9         switch active plot
  */
 
 import {
@@ -17,11 +16,11 @@ import {
   ChevronRight,
   Flag,
   FlagOff,
-  Plus,
-  Trash2,
   Check,
   AlertCircle,
   Map,
+  Plus,
+  X,
 } from "lucide-react"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -31,8 +30,9 @@ import "maplibre-gl/dist/maplibre-gl.css"
 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardHeader } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -53,15 +53,15 @@ function apiUrl(path: string): string {
 const MAP_STYLE = {
   version: 8 as const,
   sources: {
-    "esri-satellite": {
+    "osm": {
       type: "raster" as const,
-      tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
       tileSize: 256,
-      attribution: "Tiles © Esri",
+      attribution: "© OpenStreetMap contributors",
       maxzoom: 19,
     },
   },
-  layers: [{ id: "esri-satellite", type: "raster" as const, source: "esri-satellite" }],
+  layers: [{ id: "osm", type: "raster" as const, source: "osm" }],
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -99,11 +99,20 @@ interface PlotMarkerProps {
 }
 
 const DIRECTIONS = [
-  { value: "north_to_south", label: "North → South" },
-  { value: "south_to_north", label: "South → North" },
-  { value: "east_to_west",   label: "East → West" },
-  { value: "west_to_east",   label: "West → East" },
+  { value: "down",  label: "Down" },
+  { value: "up",    label: "Up" },
+  { value: "left",  label: "Left" },
+  { value: "right", label: "Right" },
 ]
+
+function makePlots(count: number): PlotSelection[] {
+  return Array.from({ length: count }, (_, i) => ({
+    plot_id: i + 1,
+    start_image: null,
+    end_image: null,
+    direction: "down",
+  }))
+}
 
 // ── GPS Trajectory Panel ───────────────────────────────────────────────────────
 
@@ -128,7 +137,6 @@ function GpsTrajectoryPanel({
 
   const points = gpsData?.points ?? []
 
-  // Fit map to trajectory bounds once points arrive
   useEffect(() => {
     if (!mapRef.current || points.length < 2) return
     const lons = points.map((p) => p.lon)
@@ -204,7 +212,8 @@ function GpsTrajectoryPanel({
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
-export function PlotMarker({ runId, onSaved, onCancel }: PlotMarkerProps) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerProps) {
   const { showErrorToast } = useCustomToast()
   const queryClient = useQueryClient()
 
@@ -214,19 +223,64 @@ export function PlotMarker({ runId, onSaved, onCancel }: PlotMarkerProps) {
       ProcessingService.listImages({ id: runId }) as unknown as Promise<ImageListResponse>,
   })
 
+  const { data: existingData } = useQuery<{ selections: PlotSelection[] }>({
+    queryKey: ["plot-marking", runId],
+    queryFn: () =>
+      ProcessingService.loadPlotMarking({ id: runId }) as unknown as Promise<{ selections: PlotSelection[] }>,
+  })
+
   const images = imageData?.images ?? []
   const rawDir = imageData?.raw_dir ?? ""
-  const hasGps = imageData?.has_gps ?? false
 
   const [currentIdx, setCurrentIdx] = useState(0)
   const [showGps, setShowGps] = useState(false)
-  const [plots, setPlots] = useState<PlotSelection[]>([
-    { plot_id: 1, start_image: null, end_image: null, direction: "north_to_south" },
-  ])
-  const [activePlotId, setActivePlotId] = useState<number>(1)
 
-  const activePlot = plots.find((p) => p.plot_id === activePlotId)
+  // plots state: array of PlotSelection
+  const [plots, setPlots] = useState<PlotSelection[]>(makePlots(1))
+  // which plot page we're viewing (0-indexed into plots array)
+  const [plotPage, setPlotPage] = useState(0)
+  // editable total-plots input
+  const [totalInput, setTotalInput] = useState("1")
+
+  // Load existing selections when data arrives
+  useEffect(() => {
+    if (existingData?.selections && existingData.selections.length > 0) {
+      const loaded = existingData.selections.map((s) => ({
+        plot_id: Number(s.plot_id),
+        start_image: s.start_image ?? null,
+        end_image: s.end_image ?? null,
+        direction: s.direction ?? "down",
+      }))
+      setPlots(loaded)
+      setTotalInput(String(loaded.length))
+      setPlotPage(0)
+    }
+  }, [existingData])
+
+  const activePlot = plots[plotPage] ?? null
   const currentImage = images[currentIdx] ?? null
+
+  // When total input changes, resize the plots array
+  const applyTotal = (val: string) => {
+    const n = parseInt(val)
+    if (!n || n < 1 || n > 999) return
+    setPlots((prev) => {
+      if (n === prev.length) return prev
+      if (n > prev.length) {
+        return [
+          ...prev,
+          ...Array.from({ length: n - prev.length }, (_, i) => ({
+            plot_id: prev.length + i + 1,
+            start_image: null,
+            end_image: null,
+            direction: "north_to_south",
+          })),
+        ]
+      }
+      return prev.slice(0, n)
+    })
+    setPlotPage((p) => Math.min(p, n - 1))
+  }
 
   const prev = useCallback(() => setCurrentIdx((i) => Math.max(0, i - 1)), [])
   const next = useCallback(
@@ -237,53 +291,21 @@ export function PlotMarker({ runId, onSaved, onCancel }: PlotMarkerProps) {
   const markStart = useCallback(() => {
     if (!currentImage) return
     setPlots((prev) =>
-      prev.map((p) => p.plot_id === activePlotId ? { ...p, start_image: currentImage } : p)
+      prev.map((p, i) => i === plotPage ? { ...p, start_image: currentImage } : p)
     )
-  }, [currentImage, activePlotId])
+  }, [currentImage, plotPage])
 
   const markEnd = useCallback(() => {
     if (!currentImage) return
     setPlots((prev) =>
-      prev.map((p) => p.plot_id === activePlotId ? { ...p, end_image: currentImage } : p)
+      prev.map((p, i) => i === plotPage ? { ...p, end_image: currentImage } : p)
     )
-  }, [currentImage, activePlotId])
+  }, [currentImage, plotPage])
 
-  // Global keyboard shortcuts — attached to window so no focus management needed
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-      if (e.key === "ArrowLeft")  { e.preventDefault(); prev() }
-      if (e.key === "ArrowRight") { e.preventDefault(); next() }
-      if (e.key === "s" || e.key === "S") { e.preventDefault(); markStart() }
-      if (e.key === "e" || e.key === "E") { e.preventDefault(); markEnd() }
-      const digit = parseInt(e.key)
-      if (digit >= 1 && digit <= 9) {
-        const target = plots[digit - 1]
-        if (target) setActivePlotId(target.plot_id)
-      }
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [prev, next, markStart, markEnd, plots])
-
-  const addPlot = () => {
-    const newId = Math.max(...plots.map((p) => p.plot_id)) + 1
-    setPlots((prev) => [
-      ...prev,
-      { plot_id: newId, start_image: null, end_image: null, direction: "north_to_south" },
-    ])
-    setActivePlotId(newId)
-  }
-
-  const removePlot = (id: number) => {
-    if (plots.length === 1) return
-    const remaining = plots.filter((p) => p.plot_id !== id)
-    setPlots(remaining)
-    if (activePlotId === id) setActivePlotId(remaining[0].plot_id)
-  }
-
-  const setDirection = (id: number, direction: string) => {
-    setPlots((prev) => prev.map((p) => (p.plot_id === id ? { ...p, direction } : p)))
+  const setDirection = (direction: string) => {
+    setPlots((prev) =>
+      prev.map((p, i) => i === plotPage ? { ...p, direction } : p)
+    )
   }
 
   const jumpTo = (imageName: string | null) => {
@@ -292,8 +314,34 @@ export function PlotMarker({ runId, onSaved, onCancel }: PlotMarkerProps) {
     if (idx >= 0) setCurrentIdx(idx)
   }
 
+  const addPlot = useCallback(() => {
+    setPlots((prev) => {
+      const newId = prev.length + 1
+      const updated = [...prev, { plot_id: newId, start_image: null, end_image: null, direction: "down" }]
+      setTotalInput(String(updated.length))
+      setPlotPage(updated.length - 1)
+      return updated
+    })
+  }, [])
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      if (e.key === "ArrowLeft")  { e.preventDefault(); prev() }
+      if (e.key === "ArrowRight") { e.preventDefault(); next() }
+      if (e.key === "s" || e.key === "S") { e.preventDefault(); markStart() }
+      if (e.key === "e" || e.key === "E") { e.preventDefault(); markEnd() }
+      if (e.key === "n" || e.key === "N") { e.preventDefault(); addPlot() }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [prev, next, markStart, markEnd, addPlot])
+
   const incomplete = plots.filter((p) => !p.start_image || !p.end_image)
   const canSave = incomplete.length === 0 && plots.length > 0
+
+  const { showSuccessToast } = useCustomToast()
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -303,7 +351,8 @@ export function PlotMarker({ runId, onSaved, onCancel }: PlotMarkerProps) {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] })
-      onSaved()
+      queryClient.invalidateQueries({ queryKey: ["plot-marking", runId] })
+      showSuccessToast("Plot markings saved")
     },
     onError: () => showErrorToast("Failed to save plot markings"),
   })
@@ -330,35 +379,43 @@ export function PlotMarker({ runId, onSaved, onCancel }: PlotMarkerProps) {
     )
   }
 
+  const doneCount = plots.filter((p) => p.start_image && p.end_image).length
+
   return (
     <div className="space-y-3">
-      {/* Keyboard hint + GPS toggle */}
+      {/* Keyboard hint bar */}
       <div className="flex items-center justify-between text-xs text-muted-foreground bg-muted/40 rounded px-3 py-1.5">
         <span>
           <kbd className="bg-background border rounded px-1">←</kbd>
           <kbd className="bg-background border rounded px-1 ml-1">→</kbd> navigate ·{" "}
           <kbd className="bg-background border rounded px-1">S</kbd> start ·{" "}
           <kbd className="bg-background border rounded px-1">E</kbd> end ·{" "}
-          <kbd className="bg-background border rounded px-1">1–9</kbd> switch plot
+          <kbd className="bg-background border rounded px-1">N</kbd> new plot
         </span>
-        {hasGps && (
-          <button
-            onClick={() => setShowGps((v) => !v)}
-            className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors ${
-              showGps ? "bg-primary text-primary-foreground" : "hover:bg-muted"
-            }`}
-          >
-            <Map className="w-3.5 h-3.5" />
-            {showGps ? "Hide map" : "GPS map"}
-          </button>
-        )}
+        <button
+          onClick={() => setShowGps((v) => !v)}
+          className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors ${
+            showGps ? "bg-primary text-primary-foreground" : "hover:bg-muted"
+          }`}
+        >
+          <Map className="w-3.5 h-3.5" />
+          {showGps ? "Hide GPS map" : "GPS map"}
+        </button>
       </div>
 
-      {/* Main layout — image viewer | [GPS map] | plot list */}
-      <div className={`grid gap-4 ${showGps ? "grid-cols-[2fr_2fr_1fr]" : "grid-cols-[3fr_1fr]"}`}>
+      {/* Main layout — [GPS map |] image viewer | plot panel */}
+      <div className={`grid gap-4 ${showGps ? "grid-cols-[1fr_3fr_1fr]" : "grid-cols-[3fr_1fr]"}`}>
+
+        {/* ── GPS map (left, only when shown) ── */}
+        {showGps && (
+          <div className="rounded-lg overflow-hidden border" style={{ minHeight: 400 }}>
+            <GpsTrajectoryPanel runId={runId} currentImage={currentImage} />
+          </div>
+        )}
 
         {/* ── Image viewer ── */}
         <div className="space-y-2">
+          {/* Image */}
           <div className="relative rounded-lg overflow-hidden bg-black aspect-video flex items-center justify-center">
             {imgSrc ? (
               <img
@@ -370,6 +427,11 @@ export function PlotMarker({ runId, onSaved, onCancel }: PlotMarkerProps) {
             ) : (
               <span className="text-white/50 text-sm">{currentImage}</span>
             )}
+            {/* Crosshair */}
+            <div className="absolute inset-0 pointer-events-none">
+              <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 border-l-2 border-dashed border-red-500/70" />
+              <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 border-t-2 border-dashed border-red-500/70" />
+            </div>
             {activePlot?.start_image === currentImage && (
               <div className="absolute top-2 left-2">
                 <Badge className="bg-green-600 text-white">START</Badge>
@@ -382,6 +444,7 @@ export function PlotMarker({ runId, onSaved, onCancel }: PlotMarkerProps) {
             )}
           </div>
 
+          {/* Image navigation */}
           <div className="flex items-center gap-2">
             <Button variant="outline" size="icon" onClick={prev} disabled={currentIdx === 0}>
               <ChevronLeft className="w-4 h-4" />
@@ -397,6 +460,7 @@ export function PlotMarker({ runId, onSaved, onCancel }: PlotMarkerProps) {
             {currentIdx + 1} / {images.length}
           </div>
 
+          {/* Mark buttons */}
           <div className="flex gap-2">
             <Button
               className="flex-1"
@@ -417,122 +481,167 @@ export function PlotMarker({ runId, onSaved, onCancel }: PlotMarkerProps) {
               Mark End
             </Button>
           </div>
+
         </div>
 
-        {/* ── GPS trajectory map ── */}
-        {showGps && (
-          <div className="rounded-lg overflow-hidden border" style={{ minHeight: 340 }}>
-            <GpsTrajectoryPanel runId={runId} currentImage={currentImage} />
-          </div>
-        )}
+        {/* ── Right: plot pager ── */}
+        <div className="space-y-3">
 
-        {/* ── Plot list ── */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium">Plots ({plots.length})</span>
-            <Button variant="outline" size="sm" onClick={addPlot}>
-              <Plus className="w-3 h-3 mr-1" />
-              Add
+          {/* Total plots control */}
+          <div className="flex items-center gap-2">
+            <Label className="text-xs text-muted-foreground whitespace-nowrap">Plots</Label>
+            <Input
+              type="number"
+              min={1}
+              max={999}
+              value={totalInput}
+              className="h-7 text-xs w-16"
+              onChange={(e) => setTotalInput(e.target.value)}
+              onBlur={() => applyTotal(totalInput)}
+              onKeyDown={(e) => { if (e.key === "Enter") applyTotal(totalInput) }}
+            />
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-7 w-7"
+              title="Add plot (N)"
+              onClick={addPlot}
+            >
+              <Plus className="w-3.5 h-3.5" />
             </Button>
+            <span className="text-xs text-muted-foreground ml-auto">
+              {doneCount}/{plots.length} done
+            </span>
           </div>
 
-          <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
-            {plots.map((plot, i) => {
-              const isActive = plot.plot_id === activePlotId
-              const isDone = !!plot.start_image && !!plot.end_image
-              return (
-                <Card
-                  key={plot.plot_id}
-                  className={`cursor-pointer transition-colors ${
-                    isActive ? "border-primary" : "hover:border-primary/50"
-                  }`}
-                  onClick={() => setActivePlotId(plot.plot_id)}
+          {/* Plot pager */}
+          <Card className="border-primary/40">
+            <CardContent className="px-3 py-3 space-y-3">
+              {/* Page header: ← Plot X / N → */}
+              <div className="flex items-center justify-between gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => setPlotPage((p) => Math.max(0, p - 1))}
+                  disabled={plotPage === 0}
                 >
-                  <CardHeader className="py-2 px-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        {isDone ? (
-                          <Check className="w-4 h-4 text-green-600" />
-                        ) : (
-                          <div className="w-4 h-4 rounded-full border-2 border-muted-foreground" />
-                        )}
-                        <span className="text-sm font-medium">
-                          Plot {plot.plot_id}
-                          <span className="text-muted-foreground text-xs ml-1 font-normal">
-                            ({i + 1})
-                          </span>
-                        </span>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={(e) => { e.stopPropagation(); removePlot(plot.plot_id) }}
-                        disabled={plots.length === 1}
-                      >
-                        <Trash2 className="w-3 h-3 text-muted-foreground" />
-                      </Button>
-                    </div>
-                  </CardHeader>
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
 
-                  {isActive && (
-                    <CardContent className="px-3 pb-3 space-y-2">
-                      <div className="flex items-center gap-1">
-                        <Label className="text-xs text-muted-foreground w-8 shrink-0">Start</Label>
-                        <span className="text-xs font-mono truncate flex-1 min-w-0 text-green-700 dark:text-green-400">
-                          {plot.start_image ?? "—"}
-                        </span>
-                        {plot.start_image && (
-                          <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={() => jumpTo(plot.start_image)}>
-                            <ChevronRight className="w-3 h-3" />
-                          </Button>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Label className="text-xs text-muted-foreground w-8 shrink-0">End</Label>
-                        <span className="text-xs font-mono truncate flex-1 min-w-0 text-red-700 dark:text-red-400">
-                          {plot.end_image ?? "—"}
-                        </span>
-                        {plot.end_image && (
-                          <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={() => jumpTo(plot.end_image)}>
-                            <ChevronRight className="w-3 h-3" />
-                          </Button>
-                        )}
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">Direction</Label>
-                        <Select
-                          value={plot.direction}
-                          onValueChange={(v) => setDirection(plot.plot_id, v)}
-                        >
-                          <SelectTrigger className="h-7 text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {DIRECTIONS.map((d) => (
-                              <SelectItem key={d.value} value={d.value} className="text-xs">
-                                {d.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </CardContent>
+                <div className="flex items-center gap-1 flex-1 justify-center">
+                  {activePlot?.start_image && activePlot?.end_image ? (
+                    <Check className="w-3.5 h-3.5 text-green-600 shrink-0" />
+                  ) : (
+                    <div className="w-3.5 h-3.5 rounded-full border-2 border-muted-foreground shrink-0" />
                   )}
-                </Card>
-              )
-            })}
-          </div>
+                  <span className="text-sm font-medium">
+                    Plot {activePlot?.plot_id ?? "—"}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    / {plots.length}
+                  </span>
+                </div>
+
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => setPlotPage((p) => Math.min(plots.length - 1, p + 1))}
+                  disabled={plotPage === plots.length - 1}
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+              </div>
+
+              {/* Start/End */}
+              {activePlot && (
+                <>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-1">
+                      <Label className="text-xs text-muted-foreground w-8 shrink-0">Start</Label>
+                      <span className="text-xs font-mono truncate flex-1 min-w-0 text-green-700 dark:text-green-400">
+                        {activePlot.start_image ?? "—"}
+                      </span>
+                      {activePlot.start_image && (
+                        <>
+                          <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" title="Jump to" onClick={() => jumpTo(activePlot.start_image)}>
+                            <ChevronRight className="w-3 h-3" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0 text-muted-foreground hover:text-destructive" title="Clear start" onClick={() => setPlots((prev) => prev.map((p, i) => i === plotPage ? { ...p, start_image: null } : p))}>
+                            <X className="w-3 h-3" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Label className="text-xs text-muted-foreground w-8 shrink-0">End</Label>
+                      <span className="text-xs font-mono truncate flex-1 min-w-0 text-red-700 dark:text-red-400">
+                        {activePlot.end_image ?? "—"}
+                      </span>
+                      {activePlot.end_image && (
+                        <>
+                          <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" title="Jump to" onClick={() => jumpTo(activePlot.end_image)}>
+                            <ChevronRight className="w-3 h-3" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0 text-muted-foreground hover:text-destructive" title="Clear end" onClick={() => setPlots((prev) => prev.map((p, i) => i === plotPage ? { ...p, end_image: null } : p))}>
+                            <X className="w-3 h-3" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Direction</Label>
+                    <Select
+                      value={activePlot.direction}
+                      onValueChange={setDirection}
+                    >
+                      <SelectTrigger className="h-7 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {DIRECTIONS.map((d) => (
+                          <SelectItem key={d.value} value={d.value} className="text-xs">
+                            {d.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </>
+              )}
+
+              {/* Dot progress strip */}
+              <div className="flex flex-wrap gap-1 pt-1">
+                {plots.map((p, i) => (
+                  <button
+                    key={p.plot_id}
+                    onClick={() => setPlotPage(i)}
+                    className={`w-2.5 h-2.5 rounded-full border transition-colors ${
+                      i === plotPage
+                        ? "bg-primary border-primary"
+                        : p.start_image && p.end_image
+                        ? "bg-green-500 border-green-500"
+                        : "bg-muted border-muted-foreground/30 hover:border-primary/50"
+                    }`}
+                    title={`Plot ${p.plot_id}`}
+                  />
+                ))}
+              </div>
+            </CardContent>
+          </Card>
 
           {incomplete.length > 0 && (
             <p className="text-xs text-amber-600">
-              {incomplete.length} plot{incomplete.length > 1 ? "s" : ""} still need{incomplete.length === 1 ? "s" : ""} start/end marked.
+              {incomplete.length} plot{incomplete.length !== 1 ? "s" : ""} still need{incomplete.length === 1 ? "s" : ""} start/end marked.
             </p>
           )}
 
           <div className="flex gap-2 pt-1">
             <Button variant="outline" className="flex-1" onClick={onCancel}>
-              Cancel
+              Back
             </Button>
             <Button
               className="flex-1"

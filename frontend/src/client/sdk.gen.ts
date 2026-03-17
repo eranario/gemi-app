@@ -3,7 +3,196 @@
 import type { CancelablePromise } from './core/CancelablePromise';
 import { OpenAPI } from './core/OpenAPI';
 import { request as __request } from './core/request';
-import type { FilesServeFileData, FilesServeFileResponse, FilesCreateFileData, FilesCreateFileResponse, FilesReadFilesData, FilesReadFilesResponse, FilesReadFieldValuesData, FilesReadFieldValuesResponse, FilesReadFileData, FilesReadFileResponse, FilesUpdateFileData, FilesUpdateFileResponse, FilesDeleteFileData, FilesDeleteFileResponse, FilesSyncFilesResponse, FilesExtractMetadataData, FilesExtractMetadataResponse, FilesCopyLocalFilesData, FilesCopyLocalFilesResponse, FilesCopyLocalFilesStreamData, FilesCopyLocalFilesStreamResponse, ItemsReadItemsData, ItemsReadItemsResponse, ItemsCreateItemData, ItemsCreateItemResponse, ItemsReadItemData, ItemsReadItemResponse, ItemsUpdateItemData, ItemsUpdateItemResponse, ItemsDeleteItemData, ItemsDeleteItemResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, PipelinesCreateData, PipelinesCreateResponse, PipelinesReadAllData, PipelinesReadAllResponse, PipelinesReadOneData, PipelinesReadOneResponse, PipelinesUpdateData, PipelinesUpdateResponse, PipelinesDeleteData, PipelinesDeleteResponse, PipelinesCreateRunData, PipelinesCreateRunResponse, PipelinesReadRunsData, PipelinesReadRunsResponse, PipelinesReadRunData, PipelinesReadRunResponse, PipelinesUpdateRunData, PipelinesUpdateRunResponse, PipelinesDeleteRunData, PipelinesDeleteRunResponse, PrivateCreateUserData, PrivateCreateUserResponse, ProcessingExecuteStepData, ProcessingExecuteStepResponse, ProcessingStopStepData, ProcessingStopStepResponse, ProcessingProgressStreamData, ProcessingProgressStreamResponse, ProcessingListOutputsData, ProcessingListOutputsResponse, ProcessingSavePlotMarkingData, ProcessingSavePlotMarkingResponse, ProcessingListImagesData, ProcessingListImagesResponse, ProcessingApplyBoundariesData, ProcessingApplyBoundariesResponse, ProcessingSaveGcpSelectionData, ProcessingSaveGcpSelectionResponse, ProcessingGcpCandidatesData, ProcessingGcpCandidatesResponse, ProcessingSaveGcpLocationsData, ProcessingSaveGcpLocationsResponse, ProcessingSavePlotBoundariesData, ProcessingSavePlotBoundariesResponse, ProcessingOrthomosaicInfoData, ProcessingOrthomosaicInfoResponse, ProcessingInferenceResultsData, ProcessingInferenceResultsResponse, ProcessingDownloadCropsData, ProcessingDownloadCropsResponse, SettingsReadDataRootResponse, SettingsUpdateDataRootData, SettingsUpdateDataRootResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse, UtilsDockerCheckResponse, WorkspacesCreateData, WorkspacesCreateResponse, WorkspacesReadAllData, WorkspacesReadAllResponse, WorkspacesReadOneData, WorkspacesReadOneResponse, WorkspacesUpdateData, WorkspacesUpdateResponse, WorkspacesDeleteData, WorkspacesDeleteResponse } from './types.gen';
+import type { AnalyzeListRunsResponse, AnalyzeGetTraitsData, AnalyzeGetTraitsResponse, AnalyzeListTraitRecordsData, AnalyzeListTraitRecordsResponse, AnalyzeGetTraitRecordGeojsonData, AnalyzeGetTraitRecordGeojsonResponse, AnalyzeGetTraitRecordOrthoInfoData, AnalyzeGetTraitRecordOrthoInfoResponse, AnalyzeGetTraitRecordPlotImageData, AnalyzeGetTraitRecordPlotImageResponse, AnalyzeDeleteTraitRecordData, AnalyzeDeleteTraitRecordResponse, AnalyzeGetOrthoInfoData, AnalyzeGetOrthoInfoResponse, FilesServeFileData, FilesServeFileResponse, FilesCreateFileData, FilesCreateFileResponse, FilesReadFilesData, FilesReadFilesResponse, FilesReadFieldValuesData, FilesReadFieldValuesResponse, FilesReadFileData, FilesReadFileResponse, FilesUpdateFileData, FilesUpdateFileResponse, FilesDeleteFileData, FilesDeleteFileResponse, FilesListUploadImagesData, FilesListUploadImagesResponse, FilesDownloadUploadZipData, FilesDownloadUploadZipResponse, FilesSyncFilesResponse, FilesExtractMetadataData, FilesExtractMetadataResponse, FilesCheckGeotiffData, FilesCheckGeotiffResponse, FilesConvertGeotiffData, FilesConvertGeotiffResponse, FilesCopyLocalFilesData, FilesCopyLocalFilesResponse, FilesCopyLocalFilesStreamData, FilesCopyLocalFilesStreamResponse, ItemsReadItemsData, ItemsReadItemsResponse, ItemsCreateItemData, ItemsCreateItemResponse, ItemsReadItemData, ItemsReadItemResponse, ItemsUpdateItemData, ItemsUpdateItemResponse, ItemsDeleteItemData, ItemsDeleteItemResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, PipelinesCreateData, PipelinesCreateResponse, PipelinesReadAllData, PipelinesReadAllResponse, PipelinesReadOneData, PipelinesReadOneResponse, PipelinesUpdateData, PipelinesUpdateResponse, PipelinesDeleteData, PipelinesDeleteResponse, PipelinesCreateRunData, PipelinesCreateRunResponse, PipelinesReadRunsData, PipelinesReadRunsResponse, PipelinesReadRunData, PipelinesReadRunResponse, PipelinesUpdateRunData, PipelinesUpdateRunResponse, PipelinesDeleteRunData, PipelinesDeleteRunResponse, PrivateCreateUserData, PrivateCreateUserResponse, ProcessingExecuteStepData, ProcessingExecuteStepResponse, ProcessingStopStepData, ProcessingStopStepResponse, ProcessingProgressStreamData, ProcessingProgressStreamResponse, ProcessingListOutputsData, ProcessingListOutputsResponse, ProcessingSavePlotMarkingData, ProcessingSavePlotMarkingResponse, ProcessingLoadPlotMarkingData, ProcessingLoadPlotMarkingResponse, ProcessingListImagesData, ProcessingListImagesResponse, ProcessingGetGpsDataData, ProcessingGetGpsDataResponse, ProcessingApplyBoundariesData, ProcessingApplyBoundariesResponse, ProcessingGetFieldDesignData, ProcessingGetFieldDesignResponse, ProcessingSaveFieldDesignData, ProcessingSaveFieldDesignResponse, ProcessingSavePlotGridData, ProcessingSavePlotGridResponse, ProcessingGeneratePlotGridData, ProcessingGeneratePlotGridResponse, ProcessingSaveGcpSelectionData, ProcessingSaveGcpSelectionResponse, ProcessingGcpCandidatesData, ProcessingGcpCandidatesResponse, ProcessingSaveGcpLocationsData, ProcessingSaveGcpLocationsResponse, ProcessingSavePlotBoundariesData, ProcessingSavePlotBoundariesResponse, ProcessingListPlotBoundariesData, ProcessingListPlotBoundariesResponse, ProcessingOrthomosaicInfoData, ProcessingOrthomosaicInfoResponse, ProcessingMosaicPreviewData, ProcessingMosaicPreviewResponse, ProcessingListOrthomosaicsData, ProcessingListOrthomosaicsResponse, ProcessingOrthomosaicVersionPreviewData, ProcessingOrthomosaicVersionPreviewResponse, ProcessingDeleteOrthomosaicData, ProcessingDeleteOrthomosaicResponse, ProcessingActivateOrthomosaicData, ProcessingActivateOrthomosaicResponse, ProcessingRenameOrthomosaicData, ProcessingRenameOrthomosaicResponse, ProcessingRenamePlotBoundaryData, ProcessingRenamePlotBoundaryResponse, ProcessingDeletePlotBoundaryData, ProcessingDeletePlotBoundaryResponse, ProcessingDownloadCropsForBoundaryData, ProcessingDownloadCropsForBoundaryResponse, ProcessingUseUploadedOrthoData, ProcessingUseUploadedOrthoResponse, ProcessingCheckUploadedOrthoData, ProcessingCheckUploadedOrthoResponse, ProcessingGetInferenceResultsData, ProcessingGetInferenceResultsResponse, ProcessingGetStitchOutputsData, ProcessingGetStitchOutputsResponse, ProcessingDeleteInferenceResultData, ProcessingDeleteInferenceResultResponse, ProcessingDownloadCropsData, ProcessingDownloadCropsResponse, SettingsReadDataRootResponse, SettingsUpdateDataRootData, SettingsUpdateDataRootResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse, UtilsDockerCheckResponse, UtilsCapabilitiesResponse, WorkspacesCreateData, WorkspacesCreateResponse, WorkspacesReadAllData, WorkspacesReadAllResponse, WorkspacesReadOneData, WorkspacesReadOneResponse, WorkspacesUpdateData, WorkspacesUpdateResponse, WorkspacesDeleteData, WorkspacesDeleteResponse, WorkspacesWorkspaceCardImagesData, WorkspacesWorkspaceCardImagesResponse } from './types.gen';
+
+export class AnalyzeService {
+    /**
+     * List Runs
+     * Return all pipeline runs that have at least one analyzable output.
+     * Includes workspace name, pipeline name/type, run date, and a list of
+     * available output types (badges).
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static listRuns(): CancelablePromise<AnalyzeListRunsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/analyze/runs'
+        });
+    }
+    
+    /**
+     * Get Traits
+     * Return a GeoJSON FeatureCollection with plot polygons + numeric properties.
+     *
+     * Aerial: reads traits_geojson directly.
+     * Ground: joins plot_boundaries.geojson with inference CSVs — aggregates
+     * per-class detection counts per plot so both pipeline types share
+     * the same response shape.
+     *
+     * Response also includes `metric_columns` — sorted list of numeric property
+     * keys for the MetricSelector dropdown.
+     * @param data The data for the request.
+     * @param data.runId
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getTraits(data: AnalyzeGetTraitsData): CancelablePromise<AnalyzeGetTraitsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/analyze/runs/{run_id}/traits',
+            path: {
+                run_id: data.runId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * List Trait Records
+     * Return all TraitRecords with workspace / pipeline / run metadata joined in.
+     * Optionally filter by workspace_id or pipeline_id.
+     * @param data The data for the request.
+     * @param data.workspaceId
+     * @param data.pipelineId
+     * @param data.runId
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static listTraitRecords(data: AnalyzeListTraitRecordsData = {}): CancelablePromise<AnalyzeListTraitRecordsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/analyze/trait-records',
+            query: {
+                workspace_id: data.workspaceId,
+                pipeline_id: data.pipelineId,
+                run_id: data.runId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Trait Record Geojson
+     * Return the GeoJSON FeatureCollection for a specific TraitRecord.
+     * @param data The data for the request.
+     * @param data.recordId
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getTraitRecordGeojson(data: AnalyzeGetTraitRecordGeojsonData): CancelablePromise<AnalyzeGetTraitRecordGeojsonResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/analyze/trait-records/{record_id}/geojson',
+            path: {
+                record_id: data.recordId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Trait Record Ortho Info
+     * Return ortho bounds and a preview URL for the specific ortho version
+     * that was used when this TraitRecord was created.
+     *
+     * preview_url is the /pipeline-runs/{id}/orthomosaics/{v}/preview endpoint
+     * (returns a downscaled JPEG, much faster than serving the full TIF).
+     * @param data The data for the request.
+     * @param data.recordId
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getTraitRecordOrthoInfo(data: AnalyzeGetTraitRecordOrthoInfoData): CancelablePromise<AnalyzeGetTraitRecordOrthoInfoResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/analyze/trait-records/{record_id}/ortho-info',
+            path: {
+                record_id: data.recordId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Trait Record Plot Image
+     * Serve the cropped PNG for a single plot from the trait record's run.
+     * Image is at Processed/.../cropped_images/plot_{plot_id}.png
+     * @param data The data for the request.
+     * @param data.recordId
+     * @param data.plotId
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getTraitRecordPlotImage(data: AnalyzeGetTraitRecordPlotImageData): CancelablePromise<AnalyzeGetTraitRecordPlotImageResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/analyze/trait-records/{record_id}/plot-image/{plot_id}',
+            path: {
+                record_id: data.recordId,
+                plot_id: data.plotId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Delete Trait Record
+     * @param data The data for the request.
+     * @param data.recordId
+     * @returns null Successful Response
+     * @throws ApiError
+     */
+    public static deleteTraitRecord(data: AnalyzeDeleteTraitRecordData): CancelablePromise<AnalyzeDeleteTraitRecordResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/analyze/trait-records/{record_id}',
+            path: {
+                record_id: data.recordId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Ortho Info
+     * Return the path and WGS84 bounds of the mosaic image for map display.
+     *
+     * Aerial: {date}-RGB.tif (or Pyramid.tif)
+     * Ground: combined_mosaic.tif from georeferencing output dir
+     *
+     * Response:
+     * { available, path, bounds: [[s,w],[n,e]] }
+     * @param data The data for the request.
+     * @param data.runId
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getOrthoInfo(data: AnalyzeGetOrthoInfoData): CancelablePromise<AnalyzeGetOrthoInfoResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/analyze/runs/{run_id}/ortho-info',
+            path: {
+                run_id: data.runId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+}
 
 export class FilesService {
     /**
@@ -166,6 +355,48 @@ export class FilesService {
     }
     
     /**
+     * List Upload Images
+     * Return a list of image file paths within an upload's storage directory.
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static listUploadImages(data: FilesListUploadImagesData): CancelablePromise<FilesListUploadImagesResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/files/{id}/list-images',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Download Upload Zip
+     * Stream the upload's storage directory as a ZIP file.
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static downloadUploadZip(data: FilesDownloadUploadZipData): CancelablePromise<FilesDownloadUploadZipResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/files/{id}/download-zip',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
      * Sync Files
      * @returns unknown Successful Response
      * @throws ApiError
@@ -188,6 +419,62 @@ export class FilesService {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/files/extract-metadata',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Check Geotiff
+     * Read the CRS of a GeoTIFF and return whether it is WGS84 (EPSG:4326).
+     * Used after orthomosaic upload to decide if conversion is needed.
+     *
+     * Response:
+     * {
+     * "crs_epsg": 32614,
+     * "crs_name": "WGS 84 / UTM zone 14N",
+     * "is_wgs84": false,
+     * "width": 1234,
+     * "height": 5678,
+     * }
+     * @param data The data for the request.
+     * @param data.path Absolute path to the GeoTIFF
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static checkGeotiff(data: FilesCheckGeotiffData): CancelablePromise<FilesCheckGeotiffResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/files/check-geotiff',
+            query: {
+                path: data.path
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Convert Geotiff
+     * Reproject a GeoTIFF to WGS84 (EPSG:4326) in-place.
+     *
+     * The original file is backed up with a `.original.tif` suffix before
+     * conversion begins.  If conversion fails the backup is restored.
+     *
+     * Requires rasterio.  Large files may take several seconds.
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static convertGeotiff(data: FilesConvertGeotiffData): CancelablePromise<FilesConvertGeotiffResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/files/convert-geotiff',
             body: data.requestBody,
             mediaType: 'application/json',
             errors: {
@@ -803,6 +1090,27 @@ export class ProcessingService {
     }
     
     /**
+     * Load Plot Marking
+     * Return existing plot marking selections from plot_borders.csv, if it exists.
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static loadPlotMarking(data: ProcessingLoadPlotMarkingData): CancelablePromise<ProcessingLoadPlotMarkingResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/plot-marking',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
      * List Images
      * @param data The data for the request.
      * @param data.id
@@ -819,6 +1127,29 @@ export class ProcessingService {
             },
             query: {
                 extensions: data.extensions
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Gps Data
+     * Return GPS trajectory points from msgs_synced.csv for the plot marking map.
+     * Each point includes lat, lon, and the image filename so the frontend can
+     * highlight the current image's position on the map.
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getGpsData(data: ProcessingGetGpsDataData): CancelablePromise<ProcessingGetGpsDataResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/gps-data',
+            path: {
+                id: data.id
             },
             errors: {
                 422: 'Validation Error'
@@ -853,6 +1184,109 @@ export class ProcessingService {
     }
     
     /**
+     * Get Field Design
+     * Check whether a field design CSV exists for this pipeline and return its data.
+     *
+     * Response:
+     * {
+     * "available": bool,
+     * "rows": [...],   # parsed CSV rows (list of dicts)
+     * "row_count": int,
+     * "col_count": int,
+     * }
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getFieldDesign(data: ProcessingGetFieldDesignData): CancelablePromise<ProcessingGetFieldDesignResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/field-design',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Save Field Design
+     * Save field design CSV inline (without going to the Files tab).
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.requestBody
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static saveFieldDesign(data: ProcessingSaveFieldDesignData): CancelablePromise<ProcessingSaveFieldDesignResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/pipeline-runs/{id}/field-design',
+            path: {
+                id: data.id
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Save Plot Grid
+     * Save a pre-computed plot grid GeoJSON from the frontend (bypasses backend computation).
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.requestBody
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static savePlotGrid(data: ProcessingSavePlotGridData): CancelablePromise<ProcessingSavePlotGridResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/pipeline-runs/{id}/save-plot-grid',
+            path: {
+                id: data.id
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Generate Plot Grid
+     * Generate a rectangular plot grid from the population boundary + grid options.
+     * Saves Pop-Boundary-WGS84.geojson and Plot-Boundary-WGS84.geojson at pipeline level.
+     * Returns the generated GeoJSON for preview.
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.requestBody
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static generatePlotGrid(data: ProcessingGeneratePlotGridData): CancelablePromise<ProcessingGeneratePlotGridResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/pipeline-runs/{id}/generate-plot-grid',
+            path: {
+                id: data.id
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
      * Save Gcp Selection
      * @param data The data for the request.
      * @param data.id
@@ -877,16 +1311,21 @@ export class ProcessingService {
     
     /**
      * Gcp Candidates
-     * Return:
-     * - gcps: parsed list from gcp_locations.csv (label, lat, lon, alt)
-     * - images: all drone images with their EXIF GPS coordinates
-     * - has_gcp_locations: whether the CSV is available
-     * - raw_dir: absolute path to the raw image directory (for /files/serve)
+     * Return drone images, optionally filtered to those within `radius_m` metres
+     * of any GCP.
      *
-     * The frontend uses image GPS to sort candidates by proximity to each GCP
-     * and to build geo.txt when saving.
+     * GPS source priority:
+     * 1. msgs_synced.csv  — platform-log-corrected positions (most accurate)
+     * 2. Image EXIF       — fallback when data_sync hasn't run yet
+     *
+     * When filter_by_gcp=True (default), only images with valid GPS within the
+     * radius are returned.  Images with no GPS at all are excluded from the
+     * filtered set (they cannot be reliably placed relative to GCPs).
+     * When filter_by_gcp=False, all images are returned unfiltered.
      * @param data The data for the request.
      * @param data.id
+     * @param data.radiusM
+     * @param data.filterByGcp
      * @returns unknown Successful Response
      * @throws ApiError
      */
@@ -896,6 +1335,10 @@ export class ProcessingService {
             url: '/api/v1/pipeline-runs/{id}/gcp-candidates',
             path: {
                 id: data.id
+            },
+            query: {
+                radius_m: data.radiusM,
+                filter_by_gcp: data.filterByGcp
             },
             errors: {
                 422: 'Validation Error'
@@ -953,16 +1396,40 @@ export class ProcessingService {
     }
     
     /**
+     * List Plot Boundaries
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static listPlotBoundaries(data: ProcessingListPlotBoundariesData): CancelablePromise<ProcessingListPlotBoundariesResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/plot-boundaries',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
      * Orthomosaic Info
-     * Return the orthomosaic path and WGS84 bounding box so the frontend can
-     * render it as a Leaflet ImageOverlay and let the user draw plot polygons.
+     * Return the mosaic image path and WGS84 bounding box so BoundaryDrawer can
+     * render it as a Leaflet ImageOverlay.  Works for both pipeline types:
      *
-     * Returns:
+     * - Aerial: returns RGB.tif (or Pyramid.tif), existing Plot-Boundary-WGS84.geojson
+     * - Ground: returns combined_mosaic.tif from georeferencing output dir,
+     * existing plot_boundaries.geojson (georeferenced plot footprints)
+     *
+     * Response shape:
      * {
      * "available": bool,
-     * "path": str | None,        # absolute path for /files/serve
+     * "path": str | None,                 # absolute path for /files/serve
      * "bounds": [[s, w], [n, e]] | None,  # Leaflet LatLngBounds format
-     * "existing_geojson": {...} | None,   # if Plot-Boundary-WGS84.geojson exists
+     * "existing_geojson": {...} | None,
      * }
      * @param data The data for the request.
      * @param data.id
@@ -983,34 +1450,332 @@ export class ProcessingService {
     }
     
     /**
-     * Inference Results
-     * Return parsed predictions CSV + image list for the inference viewer.
-     *
-     * `model` query param selects which model's results to return (defaults to first).
-     *
-     * Response:
-     * {
-     * "available": bool,
-     * "models": ["ModelA", "ModelB"],   # all available model labels
-     * "active_model": "ModelA",
-     * "predictions": [...],
-     * "images": [{"name": str, "path": str}, ...]
-     * }
+     * Mosaic Preview
+     * Return the mosaic as a downscaled JPEG so WebKit can render it.
+     * TIF files are not renderable as <img> in WebKit/Tauri.
      * @param data The data for the request.
      * @param data.id
-     * @param data.model
+     * @param data.maxSize
      * @returns unknown Successful Response
      * @throws ApiError
      */
-    public static inferenceResults(data: ProcessingInferenceResultsData): CancelablePromise<ProcessingInferenceResultsResponse> {
+    public static mosaicPreview(data: ProcessingMosaicPreviewData): CancelablePromise<ProcessingMosaicPreviewResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/mosaic-preview',
+            path: {
+                id: data.id
+            },
+            query: {
+                max_size: data.maxSize
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * List Orthomosaics
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static listOrthomosaics(data: ProcessingListOrthomosaicsData): CancelablePromise<ProcessingListOrthomosaicsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/orthomosaics',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Orthomosaic Version Preview
+     * Return a specific orthomosaic version as a downscaled JPEG.
+     * max_size controls the longest-side resolution (default 2000 for low-res, pass 8000 for high-res).
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.version
+     * @param data.maxSize
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static orthomosaicVersionPreview(data: ProcessingOrthomosaicVersionPreviewData): CancelablePromise<ProcessingOrthomosaicVersionPreviewResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/orthomosaics/{version}/preview',
+            path: {
+                id: data.id,
+                version: data.version
+            },
+            query: {
+                max_size: data.maxSize
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Delete Orthomosaic
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.version
+     * @returns null Successful Response
+     * @throws ApiError
+     */
+    public static deleteOrthomosaic(data: ProcessingDeleteOrthomosaicData): CancelablePromise<ProcessingDeleteOrthomosaicResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/pipeline-runs/{id}/orthomosaics/{version}',
+            path: {
+                id: data.id,
+                version: data.version
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Activate Orthomosaic
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.version
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static activateOrthomosaic(data: ProcessingActivateOrthomosaicData): CancelablePromise<ProcessingActivateOrthomosaicResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/pipeline-runs/{id}/orthomosaics/{version}/activate',
+            path: {
+                id: data.id,
+                version: data.version
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Rename Orthomosaic
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.version
+     * @param data.requestBody
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static renameOrthomosaic(data: ProcessingRenameOrthomosaicData): CancelablePromise<ProcessingRenameOrthomosaicResponse> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/v1/pipeline-runs/{id}/orthomosaics/{version}/rename',
+            path: {
+                id: data.id,
+                version: data.version
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Rename Plot Boundary
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.version
+     * @param data.requestBody
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static renamePlotBoundary(data: ProcessingRenamePlotBoundaryData): CancelablePromise<ProcessingRenamePlotBoundaryResponse> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/v1/pipeline-runs/{id}/plot-boundaries/{version}/rename',
+            path: {
+                id: data.id,
+                version: data.version
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Delete Plot Boundary
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.version
+     * @returns null Successful Response
+     * @throws ApiError
+     */
+    public static deletePlotBoundary(data: ProcessingDeletePlotBoundaryData): CancelablePromise<ProcessingDeletePlotBoundaryResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/pipeline-runs/{id}/plot-boundaries/{version}',
+            path: {
+                id: data.id,
+                version: data.version
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Download Crops For Boundary
+     * Crop the specified ortho version using the specified boundary version and return as ZIP.
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.boundaryVersion
+     * @param data.orthoVersion
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static downloadCropsForBoundary(data: ProcessingDownloadCropsForBoundaryData): CancelablePromise<ProcessingDownloadCropsForBoundaryResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/pipeline-runs/{id}/plot-boundaries/{boundary_version}/download-crops',
+            path: {
+                id: data.id,
+                boundary_version: data.boundaryVersion
+            },
+            query: {
+                ortho_version: data.orthoVersion
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Use Uploaded Ortho
+     * Register a user-uploaded orthomosaic TIF as the orthomosaic output for this
+     * run, skipping ODM generation entirely.
+     *
+     * Expects the TIF to be in:
+     * Raw/{year}/{exp}/{loc}/{pop}/{date}/{platform}/{sensor}/Orthomosaic/
+     *
+     * The file is hard-linked (or copied if cross-device) to the processed dir
+     * as {date}-RGB.tif and the run's orthomosaic step is marked complete.
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static useUploadedOrtho(data: ProcessingUseUploadedOrthoData): CancelablePromise<ProcessingUseUploadedOrthoResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/pipeline-runs/{id}/use-uploaded-ortho',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Check Uploaded Ortho
+     * Check whether an uploaded orthomosaic TIF exists for this run (non-destructive).
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static checkUploadedOrtho(data: ProcessingCheckUploadedOrthoData): CancelablePromise<ProcessingCheckUploadedOrthoResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/check-uploaded-ortho',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Inference Results
+     * Return a summary of each inference CSV stored in run.outputs["inference"].
+     *
+     * Each entry: { label, plot_count, total_predictions, classes, csv_rel_path }
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getInferenceResults(data: ProcessingGetInferenceResultsData): CancelablePromise<ProcessingGetInferenceResultsResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/pipeline-runs/{id}/inference-results',
             path: {
                 id: data.id
             },
-            query: {
-                model: data.model
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Stitch Outputs
+     * Return the list of stitched plot images produced by AgRowStitch.
+     * Each entry has a name and a serve URL.
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getStitchOutputs(data: ProcessingGetStitchOutputsData): CancelablePromise<ProcessingGetStitchOutputsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/pipeline-runs/{id}/stitch-outputs',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Delete Inference Result
+     * Delete the inference CSV and remove the entry from run.outputs.
+     * @param data The data for the request.
+     * @param data.id
+     * @param data.label
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static deleteInferenceResult(data: ProcessingDeleteInferenceResultData): CancelablePromise<ProcessingDeleteInferenceResultResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/pipeline-runs/{id}/inference-results/{label}',
+            path: {
+                id: data.id,
+                label: data.label
             },
             errors: {
                 422: 'Validation Error'
@@ -1022,6 +1787,7 @@ export class ProcessingService {
      * Download Crops
      * @param data The data for the request.
      * @param data.id
+     * @param data.orthoVersion
      * @returns unknown Successful Response
      * @throws ApiError
      */
@@ -1031,6 +1797,9 @@ export class ProcessingService {
             url: '/api/v1/pipeline-runs/{id}/download-crops',
             path: {
                 id: data.id
+            },
+            query: {
+                ortho_version: data.orthoVersion
             },
             errors: {
                 422: 'Validation Error'
@@ -1315,6 +2084,20 @@ export class UtilsService {
             url: '/api/v1/utils/docker-check/'
         });
     }
+    
+    /**
+     * Capabilities
+     * Report availability of optional heavy dependencies used by processing steps.
+     * Called by the frontend to show warnings before running steps that require them.
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static capabilities(): CancelablePromise<UtilsCapabilitiesResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/utils/capabilities/'
+        });
+    }
 }
 
 export class WorkspacesService {
@@ -1413,6 +2196,32 @@ export class WorkspacesService {
         return __request(OpenAPI, {
             method: 'DELETE',
             url: '/api/v1/workspaces/{id}',
+            path: {
+                id: data.id
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Workspace Card Images
+     * Return up to 4 sampled raw frame URLs for the workspace card background.
+     *
+     * Uses the FileUpload database to find "Image Data" uploads that match the
+     * experiment/location/population/date/platform/sensor of any run belonging
+     * to this workspace, then samples frames spread across the image sequence.
+     * Raw JPEGs served directly via /files/serve — no image processing.
+     * @param data The data for the request.
+     * @param data.id
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static workspaceCardImages(data: WorkspacesWorkspaceCardImagesData): CancelablePromise<WorkspacesWorkspaceCardImagesResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/workspaces/{id}/card-images',
             path: {
                 id: data.id
             },

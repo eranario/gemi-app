@@ -86,6 +86,18 @@ export const Body_login_login_access_tokenSchema = {
     title: 'Body_login-login_access_token'
 } as const;
 
+export const ConvertGeoTiffRequestSchema = {
+    properties: {
+        file_path: {
+            type: 'string',
+            title: 'File Path'
+        }
+    },
+    type: 'object',
+    required: ['file_path'],
+    title: 'ConvertGeoTiffRequest'
+} as const;
+
 export const ExecuteStepRequestSchema = {
     properties: {
         step: {
@@ -104,6 +116,39 @@ export const ExecuteStepRequestSchema = {
             type: 'integer',
             title: 'Agrowstitch Version',
             default: 1
+        },
+        ortho_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Ortho Name'
+        },
+        ortho_version: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Ortho Version'
+        },
+        boundary_version: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Boundary Version'
         }
     },
     type: 'object',
@@ -480,6 +525,24 @@ export const GcpSelectionRequestSchema = {
     type: 'object',
     required: ['gcp_selections', 'image_gps'],
     title: 'GcpSelectionRequest'
+} as const;
+
+export const GeneratePlotGridRequestSchema = {
+    properties: {
+        pop_boundary: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Pop Boundary'
+        },
+        options: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Options'
+        }
+    },
+    type: 'object',
+    required: ['pop_boundary', 'options'],
+    title: 'GeneratePlotGridRequest'
 } as const;
 
 export const HTTPValidationErrorSchema = {
@@ -1302,6 +1365,42 @@ export const PrivateUserCreateSchema = {
     title: 'PrivateUserCreate'
 } as const;
 
+export const RenameOrthoRequestSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            title: 'Name'
+        }
+    },
+    type: 'object',
+    required: ['name'],
+    title: 'RenameOrthoRequest'
+} as const;
+
+export const RenamePlotBoundaryRequestSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            title: 'Name'
+        }
+    },
+    type: 'object',
+    required: ['name'],
+    title: 'RenamePlotBoundaryRequest'
+} as const;
+
+export const SaveFieldDesignRequestSchema = {
+    properties: {
+        csv_text: {
+            type: 'string',
+            title: 'Csv Text'
+        }
+    },
+    type: 'object',
+    required: ['csv_text'],
+    title: 'SaveFieldDesignRequest'
+} as const;
+
 export const SaveGcpLocationsRequestSchema = {
     properties: {
         csv_text: {
@@ -1312,6 +1411,75 @@ export const SaveGcpLocationsRequestSchema = {
     type: 'object',
     required: ['csv_text'],
     title: 'SaveGcpLocationsRequest'
+} as const;
+
+export const SavePlotGridRequestSchema = {
+    properties: {
+        geojson: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Geojson'
+        },
+        pop_boundary: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Pop Boundary'
+        },
+        grid_options: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Grid Options'
+        },
+        grid_offset: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Grid Offset'
+        },
+        ortho_version: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Ortho Version'
+        },
+        save_as: {
+            type: 'boolean',
+            title: 'Save As',
+            default: false
+        },
+        name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        }
+    },
+    type: 'object',
+    required: ['geojson', 'pop_boundary'],
+    title: 'SavePlotGridRequest'
 } as const;
 
 export const TokenSchema = {

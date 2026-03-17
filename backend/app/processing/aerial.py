@@ -716,8 +716,14 @@ def run_trait_extraction(
 
     # ── Create provenance record ──────────────────────────────────────────
     from app.models.pipeline import TraitRecord as _TraitRecord
+    from sqlmodel import func as _func, select as _sel
+    _max_v = session.exec(
+        _sel(_func.max(_TraitRecord.version)).where(_TraitRecord.run_id == run_id)
+    ).first()
+    _next_version = (_max_v or 0) + 1
     _trait_record = _TraitRecord(
         run_id=run_id,
+        version=_next_version,
         geojson_path=paths.rel(paths.traits_geojson),
         ortho_version=_resolved_ortho_v,
         ortho_name=_resolved_ortho_name,

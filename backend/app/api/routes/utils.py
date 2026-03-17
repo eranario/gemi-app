@@ -55,7 +55,7 @@ async def capabilities() -> dict:
     agrowstitch_path: str | None = None
 
     candidates = [
-        Path(__file__).parents[4] / "vendor" / "AgRowStitch" / "AgRowStitch.py",
+        Path(__file__).parents[3] / "vendor" / "AgRowStitch" / "AgRowStitch.py",
     ]
     env_path = __import__("os").environ.get("AGROWSTITCH_PATH")
     if env_path:

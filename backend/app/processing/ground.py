@@ -23,9 +23,11 @@ import csv
 import logging
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
@@ -74,9 +76,17 @@ def _find_msgs_synced(paths: RunPaths) -> Path | None:
 
 def _find_images_dir(paths: RunPaths) -> Path:
     """
-    Return the directory that holds extracted frame images.
-    bin_to_images writes to Raw/RGB/Images/{camera}/; fall back to Raw/.
+    Return the directory that holds extracted top-view frame images.
+    For Amiga data the images live in a nested 'top' subdirectory at an
+    unpredictable depth (e.g. raw/Images/RGB/Images/top/).
+    Falls back to raw/ if nothing is found.
     """
+    # Prefer the 'top' subdir (Amiga layout)
+    top_dirs = list(paths.raw.rglob("top"))
+    for d in top_dirs:
+        if d.is_dir():
+            return d
+    # Fallback for simpler layouts
     for candidate in [
         paths.raw / "RGB" / "Images",
         paths.raw / "Images",
@@ -87,43 +97,89 @@ def _find_images_dir(paths: RunPaths) -> Path:
     return paths.raw
 
 
-def _import_agrowstitch():
+def _find_agrowstitch_dir() -> Path | None:
     """
-    Try to import the run() function from AgRowStitch.py.
-
-    AgRowStitch is a single-file module (AgRowStitch.py) with no package structure.
-    We add its directory to sys.path then import directly.
+    Return the directory containing AgRowStitch.py, or None if not found.
 
     Looks in (priority order):
       1. vendor/AgRowStitch relative to the backend root (git submodule)
       2. AGROWSTITCH_PATH environment variable (dev override)
       3. Sibling AgRowStitch directory next to the repo root
     """
-    fallback_paths = [
-        str(Path(__file__).parent.parent.parent / "vendor" / "AgRowStitch"),
-        os.environ.get("AGROWSTITCH_PATH"),
-        str(Path(__file__).parent.parent.parent.parent / "AgRowStitch"),
+    candidates = [
+        Path(__file__).parent.parent.parent / "vendor" / "AgRowStitch",
+        Path(os.environ.get("AGROWSTITCH_PATH", "")),
+        Path(__file__).parent.parent.parent.parent / "AgRowStitch",
     ]
-    for p in fallback_paths:
-        if not p:
-            continue
-        p_path = Path(p)
-        if (p_path / "AgRowStitch.py").exists():
-            if str(p_path) not in sys.path:
-                sys.path.insert(0, str(p_path))
-            try:
-                from AgRowStitch import run as run_agrowstitch  # type: ignore
-                return run_agrowstitch
-            except ImportError:
-                continue
-
+    for p in candidates:
+        if p and (p / "AgRowStitch.py").exists():
+            return p
     return None
+
+
+def _import_agrowstitch():
+    """Import and return the AgRowStitch run() function, or None if not found."""
+    p = _find_agrowstitch_dir()
+    if p is None:
+        return None
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
+    try:
+        from AgRowStitch import run as run_agrowstitch  # type: ignore
+        return run_agrowstitch
+    except ImportError:
+        return None
 
 
 # ── Step 1: Plot Marking (data persistence only) ──────────────────────────────
 # The interactive part (image viewer) lives in the frontend.
 # This function is called by the POST /plot-marking endpoint to save the
 # selections as plot_borders.csv in Intermediate/.
+
+def _find_msgs_synced(paths: "RunPaths") -> "Path | None":
+    """Locate msgs_synced.csv under the raw dir (Amiga nested layout) or intermediate."""
+    found = next(paths.raw.rglob("msgs_synced.csv"), None)
+    if found:
+        return found
+    if paths.msgs_synced.exists():
+        return paths.msgs_synced
+    return None
+
+
+def _build_gps_index(msgs_synced_path: "Path") -> dict[str, tuple[float, float]]:
+    """
+    Build a {image_basename: (lat, lon)} index from msgs_synced.csv.
+    The Amiga CSV has a '/top/rgb_file' column with paths like '/top/rgb-123.jpg'.
+    """
+    import pandas as pd
+    try:
+        df = pd.read_csv(msgs_synced_path, on_bad_lines="skip")
+        df.columns = df.columns.str.strip()
+    except Exception:
+        return {}
+
+    lat_col = next((c for c in df.columns if c.lower() in ("lat", "latitude")), None)
+    lon_col = next((c for c in df.columns if c.lower() in ("lon", "lng", "longitude")), None)
+    img_col = next((c for c in df.columns if "top" in c.lower() and "file" in c.lower()), None)
+    if not img_col:
+        img_col = next((c for c in df.columns if "file" in c.lower()), None)
+
+    if not lat_col or not lon_col or not img_col:
+        return {}
+
+    index: dict[str, tuple[float, float]] = {}
+    for _, row in df.iterrows():
+        try:
+            lat = float(row[lat_col])
+            lon = float(row[lon_col])
+        except (ValueError, TypeError):
+            continue
+        raw_img = str(row.get(img_col, ""))
+        if raw_img and raw_img != "nan":
+            basename = raw_img.split("/")[-1]
+            index[basename] = (lat, lon)
+    return index
+
 
 def save_plot_marking(
     *,
@@ -133,27 +189,37 @@ def save_plot_marking(
 ) -> dict[str, str]:
     """
     Persist plot boundary selections to plot_borders.csv.
-
-    selections: [
-        {"plot_id": 1, "start_image": "frame_0010.jpg", "end_image": "frame_0045.jpg",
-         "start_lat": 33.1, "start_lon": -111.9, "end_lat": 33.2, "end_lon": -111.8,
-         "direction": "north_to_south"},
-        ...
-    ]
-
-    Returns relative paths for storage in run.outputs.
+    GPS coordinates are looked up from msgs_synced.csv for each start/end image.
     """
     paths = _get_paths(session, run_id)
     paths.intermediate_pipeline.mkdir(parents=True, exist_ok=True)
+
+    # Build GPS index from msgs_synced.csv so we can fill in lat/lon
+    gps_index: dict[str, tuple[float, float]] = {}
+    msgs_synced = _find_msgs_synced(paths)
+    if msgs_synced:
+        gps_index = _build_gps_index(msgs_synced)
+        logger.info("Built GPS index with %d entries from %s", len(gps_index), msgs_synced)
+
+    enriched = []
+    for sel in selections:
+        row = dict(sel)
+        start_img = row.get("start_image") or ""
+        end_img = row.get("end_image") or ""
+        if start_img in gps_index:
+            row["start_lat"], row["start_lon"] = gps_index[start_img]
+        if end_img in gps_index:
+            row["end_lat"], row["end_lon"] = gps_index[end_img]
+        enriched.append(row)
 
     fieldnames = ["plot_id", "start_image", "end_image",
                   "start_lat", "start_lon", "end_lat", "end_lon", "direction"]
     with open(paths.plot_borders, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
-        writer.writerows(selections)
+        writer.writerows(enriched)
 
-    logger.info("Saved plot_borders.csv with %d plots to %s", len(selections), paths.plot_borders)
+    logger.info("Saved plot_borders.csv with %d plots to %s", len(enriched), paths.plot_borders)
     return {"plot_marking": paths.rel(paths.plot_borders)}
 
 
@@ -181,24 +247,29 @@ def run_stitching(
     """
     import pandas as pd
     try:
-        import torch
-        _has_cuda = torch.cuda.is_available()
-    except ImportError:
-        _has_cuda = False
-
-    try:
         import yaml
     except ImportError:
         raise RuntimeError("PyYAML is required for stitching. Install it with: uv add pyyaml")
 
-    run_agrowstitch = _import_agrowstitch()
-    if run_agrowstitch is None:
+    agrowstitch_dir = _find_agrowstitch_dir()
+    if agrowstitch_dir is None:
         raise RuntimeError(
             "AgRowStitch is not available. Clone the AgRowStitch git submodule and set "
             "AGROWSTITCH_PATH to its root directory."
         )
 
     paths = _get_paths(session, run_id)
+
+    # Load pipeline config for device setting and any custom overrides
+    from app.models.pipeline import Pipeline, PipelineRun
+    run = session.get(PipelineRun, run_id)
+    pipeline = session.get(Pipeline, run.pipeline_id) if run else None
+    pipeline_cfg: dict = dict(pipeline.config or {}) if pipeline else {}
+
+    # "gpu" in the UI maps to "cuda" for AgRowStitch
+    ui_device = pipeline_cfg.get("device", "cpu")
+    agrowstitch_device = "cuda" if ui_device == "gpu" else "cpu"
+    emit({"event": "progress", "message": f"Device: {ui_device} → {agrowstitch_device}"})
 
     if not paths.plot_borders.exists():
         raise FileNotFoundError(
@@ -217,12 +288,36 @@ def run_stitching(
 
     emit({"event": "progress", "message": f"Stitching {len(plots)} plots…", "total": len(plots)})
 
-    # Load base AgRowStitch config (optional)
-    base_config_path = paths.intermediate_pipeline / "agrowstitch_config.yaml"
+    # Start with the vendor defaults so all required keys are present
+    agrowstitch_candidates = [
+        Path(__file__).parent.parent.parent / "vendor" / "AgRowStitch" / "config.yaml",
+        Path(os.environ.get("AGROWSTITCH_PATH", "")) / "config.yaml",
+        Path(__file__).parent.parent.parent.parent / "AgRowStitch" / "config.yaml",
+    ]
     base_config: dict = {}
-    if base_config_path.exists():
-        with open(base_config_path) as f:
-            base_config = yaml.safe_load(f) or {}
+    for vendor_config_path in agrowstitch_candidates:
+        if vendor_config_path.exists():
+            with open(vendor_config_path) as f:
+                base_config = yaml.safe_load(f) or {}
+            logger.info("Loaded AgRowStitch vendor defaults from %s", vendor_config_path)
+            break
+
+    # Allow per-pipeline overrides stored in the intermediate directory
+    pipeline_config_path = paths.intermediate_pipeline / "agrowstitch_config.yaml"
+    if pipeline_config_path.exists():
+        with open(pipeline_config_path) as f:
+            base_config.update(yaml.safe_load(f) or {})
+
+    # Apply custom_agrowstitch_options from pipeline settings (freeform YAML string)
+    custom_opts_str = pipeline_cfg.get("custom_agrowstitch_options", "").strip()
+    if custom_opts_str:
+        try:
+            custom_opts = yaml.safe_load(custom_opts_str)
+            if isinstance(custom_opts, dict):
+                base_config.update(custom_opts)
+                emit({"event": "progress", "message": f"Applied custom AgRowStitch options: {list(custom_opts.keys())}"})
+        except Exception as e:
+            emit({"event": "progress", "message": f"Warning: could not parse custom AgRowStitch options: {e}"})
 
     # Load msgs_synced for image filtering
     msgs_df = None
@@ -230,10 +325,15 @@ def run_stitching(
         msgs_df = pd.read_csv(msgs_path)
 
     DIRECTION_MAP = {
+        "down":  "DOWN",
+        "up":    "UP",
+        "left":  "LEFT",
+        "right": "RIGHT",
+        # legacy values from older saves
         "north_to_south": "DOWN",
         "south_to_north": "UP",
-        "east_to_west": "LEFT",
-        "west_to_east": "RIGHT",
+        "east_to_west":   "LEFT",
+        "west_to_east":   "RIGHT",
     }
 
     for i, plot in enumerate(plots):
@@ -243,34 +343,71 @@ def run_stitching(
         plot_id = plot.get("plot_id", i + 1)
         start_img = plot.get("start_image", "")
         end_img = plot.get("end_image", "")
-        ui_direction = plot.get("direction", "north_to_south")
+        ui_direction = plot.get("direction", "down")
         stitch_dir = DIRECTION_MAP.get(ui_direction, "DOWN")
 
+        plot_pct = int(i / len(plots) * 100)
         emit({"event": "progress", "index": i, "plot_id": plot_id,
-              "message": f"Stitching plot {plot_id} ({stitch_dir})"})
+              "progress": plot_pct,
+              "message": f"Stitching plot {plot_id}/{len(plots)} | direction: {ui_direction} → {stitch_dir}"})
 
         # Gather images for this plot
         plot_temp_dir = tempfile.mkdtemp(prefix=f"agrows_plot{plot_id}_")
+        emit({"event": "progress", "message": f"Plot {plot_id}: images_dir = {images_dir}"})
+        emit({"event": "progress", "message": f"Plot {plot_id}: start='{start_img}' end='{end_img}'"})
+        emit({"event": "progress", "message": f"Plot {plot_id}: msgs_df loaded = {msgs_df is not None}"})
         try:
             copied = 0
             if msgs_df is not None:
-                rgb_col = "/top/rgb_file" if "/top/rgb_file" in msgs_df.columns else None
+                # The /top/rgb_file column has values like "/top/rgb-123.jpg";
+                # start_image/end_image in plot_borders are plain basenames "rgb-123.jpg".
+                # Build a basename column for reliable range filtering.
+                rgb_col = next(
+                    (c for c in msgs_df.columns if "top" in c.lower() and "file" in c.lower()),
+                    None,
+                )
+                emit({"event": "progress", "message": f"Plot {plot_id}: rgb_col='{rgb_col}', msgs columns={list(msgs_df.columns[:6])}"})
                 if rgb_col:
-                    plot_rows = msgs_df[
-                        (msgs_df[rgb_col] >= start_img) & (msgs_df[rgb_col] <= end_img)
-                    ]
-                    for _, row in plot_rows.iterrows():
-                        rel = str(row[rgb_col]).lstrip("/")
-                        src = images_dir / rel
-                        if src.exists():
-                            shutil.copy2(src, Path(plot_temp_dir) / src.name)
-                            copied += 1
-            logger.info("[Plot %s] Copied %d images for stitching", plot_id, copied)
+                    msgs_df["_basename"] = msgs_df[rgb_col].apply(
+                        lambda v: str(v).split("/")[-1] if v and str(v) != "nan" else ""
+                    )
+                    sample = msgs_df["_basename"].dropna().iloc[:3].tolist() if len(msgs_df) > 0 else []
+                    emit({"event": "progress", "message": f"Plot {plot_id}: sample basenames = {sample}"})
+                    # Find row indices of start and end images
+                    start_mask = msgs_df["_basename"] == start_img
+                    end_mask = msgs_df["_basename"] == end_img
+                    emit({"event": "progress", "message": f"Plot {plot_id}: start found={start_mask.any()}, end found={end_mask.any()}"})
+                    if start_mask.any() and end_mask.any():
+                        start_idx = msgs_df.index[start_mask][0]
+                        end_idx = msgs_df.index[end_mask][-1]
+                        # Swap if user marked end before start in the sequence
+                        if start_idx > end_idx:
+                            start_idx, end_idx = end_idx, start_idx
+                        plot_rows = msgs_df.loc[start_idx:end_idx]
+                        unique_basenames = list(dict.fromkeys(
+                            b for b in plot_rows["_basename"] if b
+                        ))
+                        emit({"event": "progress", "message": f"Plot {plot_id}: {len(plot_rows)} rows → {len(unique_basenames)} unique images in range"})
+                        for basename in unique_basenames:
+                            src = images_dir / basename
+                            if src.exists():
+                                shutil.copy2(src, Path(plot_temp_dir) / basename)
+                                copied += 1
+                        emit({"event": "progress", "message": f"Plot {plot_id}: {copied}/{len(unique_basenames)} files copied"})
+                    else:
+                        logger.warning(
+                            "[Plot %s] start_image '%s' or end_image '%s' not found in msgs_synced",
+                            plot_id, start_img, end_img,
+                        )
+            else:
+                emit({"event": "progress", "message": f"Plot {plot_id}: no msgs_synced — msgs_path={msgs_path}"})
+
+            emit({"event": "progress", "message": f"Plot {plot_id}: total {copied} images copied to temp dir"})
 
             # Build config
             config = dict(base_config)
             config["image_directory"] = plot_temp_dir
-            config["device"] = "cuda" if _has_cuda else "cpu"
+            config["device"] = agrowstitch_device
             config["stitching_direction"] = stitch_dir
 
             with tempfile.NamedTemporaryFile(
@@ -281,14 +418,64 @@ def run_stitching(
 
             cpu_count = os.cpu_count() or 1
 
+            # Run AgRowStitch in a subprocess so it can be killed on stop.
+            # A direct function call blocks the thread with no way to interrupt it.
+            script = (
+                f"import sys; sys.path.insert(0, {str(agrowstitch_dir)!r}); "
+                f"from AgRowStitch import run; "
+                f"r = run({tmp_config!r}, {cpu_count}); "
+                f"[None for _ in r] if hasattr(r, '__iter__') and not isinstance(r, (str, bytes)) else None"
+            )
+            proc = subprocess.Popen(
+                [sys.executable, "-c", script],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+
+            # Drain stdout in a background thread so readline() never blocks
+            # the stop-event polling loop below.
+            import re as _re
+            _total_plots = len(plots)
+            _plot_index = i
+            _total_images = copied  # images copied into temp dir
+
+            def _drain(pipe, _emit, _plot_id, _pi, _np, _ni):
+                for line in pipe:
+                    line = line.rstrip()
+                    if not line.strip():
+                        continue
+                    # Parse "Starting new batch with image N" for intra-plot progress
+                    m = _re.search(r"Starting new batch with image (\d+)", line)
+                    if m and _ni > 0:
+                        batch_img = int(m.group(1))
+                        intra = batch_img / _ni  # 0.0–1.0 within this plot
+                        pct = int((_pi + intra) / _np * 100)
+                        _emit({"event": "progress", "progress": pct,
+                               "message": f"[AgRowStitch plot {_plot_id}] {line}"})
+                    else:
+                        _emit({"event": "progress", "message": f"[AgRowStitch plot {_plot_id}] {line}"})
+
+            drain_thread = threading.Thread(
+                target=_drain,
+                args=(proc.stdout, emit, plot_id, _plot_index, _total_plots, _total_images),
+                daemon=True,
+            )
+            drain_thread.start()
+
             try:
-                result = run_agrowstitch(tmp_config, cpu_count)
-                # AgRowStitch may return a generator; exhaust it
-                if result is not None and hasattr(result, "__iter__") and not isinstance(result, (str, bytes)):
-                    for step in result:
-                        if stop_event.is_set():
-                            return {}
-                        logger.debug("[Plot %s] step: %s", plot_id, step)
+                # Poll until done, checking stop every 0.3 s
+                while proc.poll() is None:
+                    if stop_event.is_set():
+                        emit({"event": "progress", "message": f"Plot {plot_id}: stop requested — killing process"})
+                        proc.kill()
+                        proc.wait()
+                        drain_thread.join(timeout=2)
+                        return {}
+                    time.sleep(0.3)
+                drain_thread.join(timeout=5)
+                if proc.returncode != 0:
+                    raise RuntimeError(f"AgRowStitch exited with code {proc.returncode}")
             finally:
                 try:
                     os.unlink(tmp_config)
@@ -323,6 +510,7 @@ def run_stitching(
         finally:
             shutil.rmtree(plot_temp_dir, ignore_errors=True)
 
+    emit({"event": "progress", "progress": 100, "message": f"Stitching complete — {len(plots)} plot(s) processed"})
     return {
         "stitching": paths.rel(out_dir),
         "stitching_version": agrowstitch_version,
@@ -385,7 +573,7 @@ def run_georeferencing(
     if paths.plot_borders.exists():
         with open(paths.plot_borders) as f:
             for row in csv.DictReader(f):
-                plot_directions[str(row["plot_id"])] = row.get("direction", "north_to_south")
+                plot_directions[str(row["plot_id"])] = row.get("direction", "down")
 
     # Find stitched plot images
     plot_pngs = sorted(out_dir.glob("full_res_mosaic_temp_plot_*.png"))
@@ -427,7 +615,7 @@ def run_georeferencing(
             logger.warning("[Plot %s] Only %d GPS rows — skipping georeferencing", plot_id_str, len(plot_df))
             continue
 
-        ui_direction = plot_directions.get(plot_id_str, "north_to_south")
+        ui_direction = plot_directions.get(plot_id_str, "down")
         success = georeference_plot(plot_id_str, plot_df, out_dir, ui_direction=ui_direction)
         if success:
             plot_ids.append(plot_id_str)

@@ -124,6 +124,11 @@ def estimate_cross_track(
 # ── Per-plot georeferencing ────────────────────────────────────────────────────
 
 DIRECTION_MAP = {
+    "down":  "DOWN",
+    "up":    "UP",
+    "left":  "LEFT",
+    "right": "RIGHT",
+    # legacy values from older saves
     "north_to_south": "DOWN",
     "south_to_north": "UP",
     "east_to_west":   "LEFT",
@@ -135,7 +140,7 @@ def georeference_plot(
     plot_index: int | str,
     plot_data: Any,            # pandas DataFrame with lat/lon columns
     out_dir: Path,
-    ui_direction: str = "north_to_south",
+    ui_direction: str = "down",
 ) -> bool:
     """
     Georeference the stitched mosaic for one plot using GPS data.

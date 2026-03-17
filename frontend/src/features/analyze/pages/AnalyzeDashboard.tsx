@@ -224,6 +224,7 @@ const traitRecordColumns: ColumnDef<TraitRecord>[] = [
     accessorKey: "date",
     filterFn: (row, id, values: string[]) => values.includes(row.getValue(id)),
   },
+  { id: "version", enableColumnFilter: false },
   { id: "ortho", enableColumnFilter: false },
   { id: "boundary", enableColumnFilter: false },
   { id: "plot_count", enableColumnFilter: false },
@@ -287,6 +288,7 @@ function TableTab({ records }: { records: TraitRecord[] }) {
               <TableHead>
                 <ColumnFilter column={table.getColumn("date")!} title="Date" />
               </TableHead>
+              <TableHead className="w-12">Version</TableHead>
               <TableHead>Ortho</TableHead>
               <TableHead>Boundary</TableHead>
               <TableHead className="text-right">Plots</TableHead>
@@ -298,7 +300,7 @@ function TableTab({ records }: { records: TraitRecord[] }) {
             {filtered.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={9}
+                  colSpan={10}
                   className="text-muted-foreground py-8 text-center text-sm"
                 >
                   No trait records match the current filter.
@@ -331,6 +333,9 @@ function TableTab({ records }: { records: TraitRecord[] }) {
                       </div>
                     </TableCell>
                     <TableCell className="text-sm">{r.date}</TableCell>
+                    <TableCell className="font-mono text-sm text-muted-foreground">
+                      v{r.version}
+                    </TableCell>
                     <TableCell>
                       <VersionBadge
                         version={r.ortho_version}

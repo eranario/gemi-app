@@ -19,7 +19,8 @@ import {
   X,
 } from "lucide-react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { subscribe } from "@/lib/sseManager";
 import { save as tauriSaveDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -202,76 +203,60 @@ interface ProgressEvent {
 function useStepProgress(runId: string, isRunning: boolean) {
   const [events, setEvents] = useState<ProgressEvent[]>([]);
   const [lastProgress, setLastProgress] = useState<number | null>(null);
-  const esRef = useRef<EventSource | null>(null);
-  const offsetRef = useRef(0);
   const queryClient = useQueryClient();
-
-  const connect = useCallback(() => {
-    if (esRef.current) esRef.current.close();
-
-    const url = apiUrl(
-      `/api/v1/pipeline-runs/${runId}/progress?offset=${offsetRef.current}`
-    );
-    const es = new EventSource(url);
-    esRef.current = es;
-
-    es.onmessage = (e) => {
-      try {
-        const evt: ProgressEvent = JSON.parse(e.data);
-        offsetRef.current += 1;
-        if (evt.event === "start") {
-          // New run started — replace stale events from the previous attempt
-          setEvents([evt]);
-          setLastProgress(null);
-        } else {
-          setEvents((prev) => [...prev, evt]);
-        }
-
-        if (typeof evt.progress === "number") setLastProgress(evt.progress);
-
-        // Refresh run state from DB when step completes or fails
-        if (
-          evt.event === "complete" ||
-          evt.event === "error" ||
-          evt.event === "cancelled"
-        ) {
-          queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
-          if (evt.event === "complete" && evt.step === "orthomosaic") {
-            queryClient.invalidateQueries({
-              queryKey: ["orthomosaic-versions", runId],
-            });
-          }
-          es.close();
-          esRef.current = null;
-        }
-      } catch {
-        // ignore parse errors
-      }
-    };
-
-    es.onerror = () => {
-      es.close();
-      esRef.current = null;
-    };
-  }, [runId, queryClient]);
+  const unsubRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    if (isRunning) {
-      connect();
-    } else {
-      esRef.current?.close();
-      esRef.current = null;
+    if (!isRunning) {
+      unsubRef.current?.();
+      unsubRef.current = null;
+      return;
     }
+
+    // Subscribe via the module-level SSE manager so the connection
+    // persists even if this component unmounts (user navigates away).
+    const unsub = subscribe(runId, (evt) => {
+      if (evt.event === "start") {
+        setEvents([evt as ProgressEvent]);
+        setLastProgress(null);
+      } else {
+        setEvents((prev) => [...prev, evt as ProgressEvent]);
+      }
+
+      if (typeof evt.progress === "number") setLastProgress(evt.progress);
+
+      if (evt.event === "complete" || evt.event === "error" || evt.event === "cancelled") {
+        queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
+        if (evt.event === "complete") {
+          if (evt.step === "stitching") {
+            queryClient.invalidateQueries({ queryKey: ["stitch-outputs", runId] });
+          }
+          if (evt.step === "georeferencing") {
+            queryClient.invalidateQueries({ queryKey: ["stitch-outputs", runId] });
+          }
+          if (evt.step === "orthomosaic") {
+            queryClient.invalidateQueries({ queryKey: ["orthomosaic-versions", runId] });
+          }
+          if (evt.step === "trait_extraction") {
+            queryClient.invalidateQueries({ queryKey: ["trait-records-run", runId] });
+            queryClient.invalidateQueries({ queryKey: ["trait-records"] });
+          }
+        }
+      }
+    });
+
+    unsubRef.current = unsub;
     return () => {
-      esRef.current?.close();
-      esRef.current = null;
+      // Unregister this component's listener but leave the SSE connection
+      // alive for ProcessContext (which has its own listener on the same connection).
+      unsub();
+      unsubRef.current = null;
     };
-  }, [isRunning, connect]);
+  }, [isRunning, runId, queryClient]);
 
   const clearEvents = () => {
-    // Reset SSE offset so next connection reads from the start of the new run.
-    // Don't wipe displayed events yet — the "start" SSE event will replace them.
-    offsetRef.current = 0;
+    setEvents([]);
+    setLastProgress(null);
   };
 
   return { events, lastProgress, clearEvents };
@@ -402,6 +387,7 @@ interface StepRowProps {
   onStopStep: () => void;
   isExecuting: boolean;
   isStopping: boolean;
+  isStarting?: boolean;
   warning?: string;
   extraContent?: React.ReactNode;
 }
@@ -486,6 +472,7 @@ function TraitRecordsPanel({
         <Table>
           <TableHeader>
             <TableRow className="text-xs">
+              <TableHead className="py-2 text-xs w-10">v</TableHead>
               <TableHead className="py-2 text-xs">Ortho</TableHead>
               <TableHead className="py-2 text-xs">Boundary</TableHead>
               <TableHead className="py-2 text-xs text-right">Plots</TableHead>
@@ -497,6 +484,9 @@ function TraitRecordsPanel({
           <TableBody>
             {records.map((r: TraitRecord) => (
               <TableRow key={r.id} className="text-xs">
+                <TableCell className="py-1.5 font-mono text-muted-foreground">
+                  v{r.version}
+                </TableCell>
                 <TableCell className="py-1.5 font-mono">
                   {versionLabel(r.ortho_version, r.ortho_name)}
                 </TableCell>
@@ -548,6 +538,89 @@ function TraitRecordsPanel({
   );
 }
 
+// ── Ground: stitch outputs panel ──────────────────────────────────────────────
+
+interface StitchPlot {
+  name: string;
+  url: string;
+}
+
+function StitchPanel({ runId }: { runId: string }) {
+  const [selected, setSelected] = useState<StitchPlot | null>(null);
+
+  const { data, isLoading } = useQuery<{ plots: StitchPlot[]; version: number }>({
+    queryKey: ["stitch-outputs", runId],
+    queryFn: async () => {
+      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/stitch-outputs`));
+      if (!res.ok) return { plots: [], version: 1 };
+      return res.json();
+    },
+    staleTime: 5_000,
+    refetchInterval: 5_000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Loading stitched plots…
+      </div>
+    );
+  }
+
+  const plots = data?.plots ?? [];
+  if (plots.length === 0) {
+    return (
+      <div className="mt-3 text-xs text-muted-foreground">
+        No stitched outputs yet — plots will appear here as they complete.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 space-y-2">
+      <p className="text-xs text-muted-foreground">
+        {plots.length} stitched plot{plots.length !== 1 ? "s" : ""} · AgRowStitch v{data?.version ?? 1}
+      </p>
+      <div className="grid grid-cols-4 gap-2">
+        {plots.map((p) => (
+          <button
+            key={p.name}
+            onClick={() => setSelected(p)}
+            className="group relative rounded overflow-hidden border bg-muted hover:border-primary transition-colors"
+          >
+            <img
+              src={apiUrl(p.url)}
+              alt={p.name}
+              className="w-full object-cover aspect-video"
+              loading="lazy"
+            />
+            <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-1.5 py-0.5 text-[10px] text-white truncate opacity-0 group-hover:opacity-100 transition-opacity">
+              {p.name}
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {/* Lightbox */}
+      <Dialog open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
+        <DialogContent className="max-w-4xl p-2">
+          <DialogHeader className="px-2 pt-2">
+            <DialogTitle className="text-sm font-mono">{selected?.name}</DialogTitle>
+          </DialogHeader>
+          {selected && (
+            <img
+              src={apiUrl(selected.url)}
+              alt={selected.name}
+              className="w-full rounded"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 // ── Ground inference results panel ────────────────────────────────────────────
 
 interface InferenceResult {
@@ -576,7 +649,8 @@ function GroundInferencePanel({
         apiUrl(`/api/v1/pipeline-runs/${runId}/inference-results`)
       );
       if (!res.ok) return [];
-      return res.json();
+      const data = await res.json();
+      return Array.isArray(data) ? data : (data?.results ?? []);
     },
     staleTime: 30_000,
   });
@@ -683,6 +757,7 @@ function StepRow({
   onStopStep,
   isExecuting,
   isStopping,
+  isStarting = false,
   warning,
   extraContent,
 }: StepRowProps) {
@@ -821,9 +896,9 @@ function StepRow({
           )}
 
           {/* Live progress for running step, or persisted log for failed step */}
-          {(isActive || status === "failed") && (
+          {(isActive || isStarting || status === "failed") && (
             <div className="mt-2 overflow-hidden">
-              {isActive && lastProgress !== null && (
+              {(isActive || isStarting) && lastProgress !== null && (
                 <div className="bg-secondary mb-1 h-1.5 w-full overflow-hidden rounded-full">
                   <div
                     className="bg-primary h-full rounded-full transition-[width] duration-300"
@@ -840,8 +915,8 @@ function StepRow({
             <ProgressLog events={stepEvents} />
           )}
 
-          {/* Extra inline content (e.g. ortho versions) — always visible when completed */}
-          {status === "completed" && extraContent && <div>{extraContent}</div>}
+          {/* Extra inline content — always visible when provided */}
+          {extraContent && <div>{extraContent}</div>}
         </div>
       </div>
     </div>
@@ -1549,7 +1624,7 @@ export function RunDetail() {
   // Set when the user clicks Stop — so DB sync effects know to show "Cancelled" not "Done"
   const stopWasRequestedRef = useRef(false);
 
-  const { data: run, isLoading: runLoading } = useQuery<PipelineRunPublic>({
+  const { data: run, isLoading: runLoading, isFetching: runFetching } = useQuery<PipelineRunPublic>({
     queryKey: ["pipeline-runs", runId],
     queryFn: () => PipelinesService.readRun({ id: runId }),
     // Poll every 3s while running so status stays fresh even without SSE
@@ -1791,6 +1866,33 @@ export function RunDetail() {
     clearEvents,
   } = useStepProgress(runId, isRunning);
 
+  // When the run becomes active (isRunning=true), ensure ProcessContext has an
+  // entry so the panel tracks it. This fires whether the user clicked Start in
+  // this session or arrived at an already-running run (e.g. after navigation).
+  // Gate on !runFetching so we never act on stale cached data from a previous
+  // visit — we only register once the fresh DB value confirms the run is running.
+  const autoRegisteredRunId = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isRunning || !run || !pipeline || runFetching) return;
+    if (autoRegisteredRunId.current === runId) return;
+    autoRegisteredRunId.current = runId;
+    // Don't duplicate if ProcessContext already has an active entry (e.g. user
+    // navigated away and back while the step was still running).
+    const alreadyTracked = processes.some(
+      (p) => p.runId === runId && (p.status === "running" || p.status === "pending"),
+    );
+    if (!alreadyTracked) {
+      addProcess({
+        type: "processing",
+        title: `${run.current_step ?? "Processing"} (${pipeline.name} · ${run.date})`,
+        status: "running",
+        items: [],
+        runId,
+        link: `/process/${workspaceId}/run/${runId}`,
+      });
+    }
+  }, [isRunning, runFetching, run, pipeline, runId, processes, addProcess, workspaceId]);
+
   // Execute step mutation
   const executeMutation = useMutation({
     mutationFn: (body: {
@@ -1806,9 +1908,11 @@ export function RunDetail() {
         id: runId,
         requestBody: body,
       }),
-    onMutate: () => clearEvents(),
+    onMutate: (body) => {
+      clearEvents();
+      setExecutingStep(body.step);
+    },
     onSuccess: () => {
-      // Immediately refresh run to get status="running"
       queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
     },
     onError: () => showErrorToast("Failed to start step"),
@@ -1826,6 +1930,13 @@ export function RunDetail() {
   });
 
   // Feed SSE events into ProcessPanel for the active long-running step
+  // Clear optimistic executingStep once backend confirms current_step or run is no longer running
+  useEffect(() => {
+    if (run?.current_step || runStatus === "failed" || runStatus === "completed") {
+      setExecutingStep(null);
+    }
+  }, [run?.current_step, runStatus]);
+
   useEffect(() => {
     const orthoId = orthoProcessIdRef.current;
     const traitId = traitProcessIdRef.current;
@@ -1948,6 +2059,9 @@ export function RunDetail() {
   ]);
 
   // Docker check dialog (shown when user tries to run orthomosaic without Docker)
+  // Track which step was just clicked so the panel shows before backend confirms
+  const [executingStep, setExecutingStep] = useState<string | null>(null);
+
   const [showDockerDialog, setShowDockerDialog] = useState(false);
 
   // Orthomosaic name prompt
@@ -1977,13 +2091,6 @@ export function RunDetail() {
       }
       // Single versions — just run with defaults (backend uses active)
       stopWasRequestedRef.current = false;
-      traitProcessIdRef.current = addProcess({
-        type: "processing",
-        title: `Trait Extraction (${pipeline?.name ?? "Pipeline"} · ${run?.date})`,
-        status: "running",
-        items: [],
-        link: `/process/${workspaceId}/run/${runId}`,
-      });
       executeMutation.mutate({ step });
       return;
     }
@@ -2008,14 +2115,6 @@ export function RunDetail() {
   function startOrthoWithName() {
     setShowOrthoNameDialog(false);
     stopWasRequestedRef.current = false;
-    // Register in the background ProcessPanel
-    orthoProcessIdRef.current = addProcess({
-      type: "processing",
-      title: `Orthomosaic (${pipeline?.name ?? "Pipeline"} · ${run?.date})`,
-      status: "running",
-      items: [],
-      link: `/process/${workspaceId}/run/${runId}`,
-    });
     executeMutation.mutate({
       step: "orthomosaic",
       ortho_name: orthoNameInput.trim() || undefined,
@@ -2025,13 +2124,6 @@ export function RunDetail() {
   function startTraitExtraction() {
     setShowTraitDialog(false);
     stopWasRequestedRef.current = false;
-    traitProcessIdRef.current = addProcess({
-      type: "processing",
-      title: `Trait Extraction (${pipeline?.name ?? "Pipeline"} · ${run?.date})`,
-      status: "running",
-      items: [],
-      link: `/process/${workspaceId}/run/${runId}`,
-    });
     executeMutation.mutate({
       step: "trait_extraction",
       ortho_version: traitOrthoVersion ?? undefined,
@@ -2331,6 +2423,7 @@ export function RunDetail() {
                   onStopStep={() => stopMutation.mutate()}
                   isExecuting={executeMutation.isPending || isRunning}
                   isStopping={stopMutation.isPending}
+                  isStarting={executingStep === step.key}
                   warning={warning}
                   extraContent={(() => {
                     if (
@@ -2351,7 +2444,7 @@ export function RunDetail() {
                         />
                       );
                     }
-                    if (step.key === "trait_extraction") {
+                    if (step.key === "trait_extraction" && pipelineType === "aerial") {
                       return (
                         <TraitRecordsPanel
                           runId={runId}
@@ -2382,6 +2475,9 @@ export function RunDetail() {
                           onDownloadCrops={handleBoundaryCropDownload}
                         />
                       );
+                    }
+                    if (step.key === "stitching" && pipelineType === "ground") {
+                      return <StitchPanel runId={runId} />;
                     }
                     if (step.key === "inference" && pipelineType === "ground") {
                       return (

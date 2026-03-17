@@ -48,6 +48,16 @@ def _reset_stuck_runs(session: Session) -> int:
 async def lifespan(app: FastAPI):
     # Startup: create tables and initialize database
     create_db_and_tables()
+    # Add columns introduced after initial schema (SQLite ALTER TABLE is idempotent via try/except)
+    with engine.connect() as _conn:
+        for _stmt in [
+            "ALTER TABLE traitrecord ADD COLUMN version INTEGER NOT NULL DEFAULT 1",
+        ]:
+            try:
+                _conn.execute(__import__("sqlalchemy").text(_stmt))
+                _conn.commit()
+            except Exception:
+                pass  # Column already exists
     with Session(engine) as session:
         init_db(session)
         _reset_stuck_runs(session)

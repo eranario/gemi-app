@@ -18,10 +18,17 @@ export type Body_login_login_access_token = {
     client_secret?: (string | null);
 };
 
+export type ConvertGeoTiffRequest = {
+    file_path: string;
+};
+
 export type ExecuteStepRequest = {
     step: string;
     models?: Array<ModelConfig>;
     agrowstitch_version?: number;
+    ortho_name?: (string | null);
+    ortho_version?: (number | null);
+    boundary_version?: (number | null);
 };
 
 export type FileUploadCreate = {
@@ -81,6 +88,15 @@ export type GcpSelectionRequest = {
         [key: string]: unknown;
     }>;
     gcp_locations_csv?: (string | null);
+};
+
+export type GeneratePlotGridRequest = {
+    pop_boundary: {
+        [key: string]: unknown;
+    };
+    options: {
+        [key: string]: unknown;
+    };
 };
 
 export type HTTPValidationError = {
@@ -252,8 +268,38 @@ export type PrivateUserCreate = {
     is_verified?: boolean;
 };
 
+export type RenameOrthoRequest = {
+    name: string;
+};
+
+export type RenamePlotBoundaryRequest = {
+    name: string;
+};
+
+export type SaveFieldDesignRequest = {
+    csv_text: string;
+};
+
 export type SaveGcpLocationsRequest = {
     csv_text: string;
+};
+
+export type SavePlotGridRequest = {
+    geojson: {
+        [key: string]: unknown;
+    };
+    pop_boundary: {
+        [key: string]: unknown;
+    };
+    grid_options?: ({
+    [key: string]: unknown;
+} | null);
+    grid_offset?: ({
+    [key: string]: unknown;
+} | null);
+    ortho_version?: (number | null);
+    save_as?: boolean;
+    name?: (string | null);
 };
 
 export type Token = {
@@ -335,6 +381,65 @@ export type WorkspaceUpdate = {
     description?: (string | null);
 };
 
+export type AnalyzeListRunsResponse = (Array<{
+    [key: string]: unknown;
+}>);
+
+export type AnalyzeGetTraitsData = {
+    runId: string;
+};
+
+export type AnalyzeGetTraitsResponse = ({
+    [key: string]: unknown;
+});
+
+export type AnalyzeListTraitRecordsData = {
+    pipelineId?: (string | null);
+    runId?: (string | null);
+    workspaceId?: (string | null);
+};
+
+export type AnalyzeListTraitRecordsResponse = (Array<{
+    [key: string]: unknown;
+}>);
+
+export type AnalyzeGetTraitRecordGeojsonData = {
+    recordId: string;
+};
+
+export type AnalyzeGetTraitRecordGeojsonResponse = ({
+    [key: string]: unknown;
+});
+
+export type AnalyzeGetTraitRecordOrthoInfoData = {
+    recordId: string;
+};
+
+export type AnalyzeGetTraitRecordOrthoInfoResponse = ({
+    [key: string]: unknown;
+});
+
+export type AnalyzeGetTraitRecordPlotImageData = {
+    plotId: string;
+    recordId: string;
+};
+
+export type AnalyzeGetTraitRecordPlotImageResponse = (unknown);
+
+export type AnalyzeDeleteTraitRecordData = {
+    recordId: string;
+};
+
+export type AnalyzeDeleteTraitRecordResponse = (null);
+
+export type AnalyzeGetOrthoInfoData = {
+    runId: string;
+};
+
+export type AnalyzeGetOrthoInfoResponse = ({
+    [key: string]: unknown;
+});
+
 export type FilesServeFileData = {
     /**
      * Absolute path to the file on disk
@@ -389,6 +494,18 @@ export type FilesDeleteFileData = {
 
 export type FilesDeleteFileResponse = (Message);
 
+export type FilesListUploadImagesData = {
+    id: string;
+};
+
+export type FilesListUploadImagesResponse = (unknown);
+
+export type FilesDownloadUploadZipData = {
+    id: string;
+};
+
+export type FilesDownloadUploadZipResponse = (unknown);
+
 export type FilesSyncFilesResponse = (unknown);
 
 export type FilesExtractMetadataData = {
@@ -398,6 +515,25 @@ export type FilesExtractMetadataData = {
 };
 
 export type FilesExtractMetadataResponse = (unknown);
+
+export type FilesCheckGeotiffData = {
+    /**
+     * Absolute path to the GeoTIFF
+     */
+    path: string;
+};
+
+export type FilesCheckGeotiffResponse = ({
+    [key: string]: unknown;
+});
+
+export type FilesConvertGeotiffData = {
+    requestBody: ConvertGeoTiffRequest;
+};
+
+export type FilesConvertGeotiffResponse = ({
+    [key: string]: unknown;
+});
 
 export type FilesCopyLocalFilesData = {
     requestBody: LocalCopyRequest;
@@ -584,6 +720,14 @@ export type ProcessingSavePlotMarkingResponse = ({
     [key: string]: unknown;
 });
 
+export type ProcessingLoadPlotMarkingData = {
+    id: string;
+};
+
+export type ProcessingLoadPlotMarkingResponse = ({
+    [key: string]: unknown;
+});
+
 export type ProcessingListImagesData = {
     extensions?: string;
     id: string;
@@ -593,11 +737,54 @@ export type ProcessingListImagesResponse = ({
     [key: string]: unknown;
 });
 
+export type ProcessingGetGpsDataData = {
+    id: string;
+};
+
+export type ProcessingGetGpsDataResponse = ({
+    [key: string]: unknown;
+});
+
 export type ProcessingApplyBoundariesData = {
     id: string;
 };
 
 export type ProcessingApplyBoundariesResponse = ({
+    [key: string]: unknown;
+});
+
+export type ProcessingGetFieldDesignData = {
+    id: string;
+};
+
+export type ProcessingGetFieldDesignResponse = ({
+    [key: string]: unknown;
+});
+
+export type ProcessingSaveFieldDesignData = {
+    id: string;
+    requestBody: SaveFieldDesignRequest;
+};
+
+export type ProcessingSaveFieldDesignResponse = ({
+    [key: string]: unknown;
+});
+
+export type ProcessingSavePlotGridData = {
+    id: string;
+    requestBody: SavePlotGridRequest;
+};
+
+export type ProcessingSavePlotGridResponse = ({
+    [key: string]: unknown;
+});
+
+export type ProcessingGeneratePlotGridData = {
+    id: string;
+    requestBody: GeneratePlotGridRequest;
+};
+
+export type ProcessingGeneratePlotGridResponse = ({
     [key: string]: unknown;
 });
 
@@ -611,7 +798,9 @@ export type ProcessingSaveGcpSelectionResponse = ({
 });
 
 export type ProcessingGcpCandidatesData = {
+    filterByGcp?: boolean;
     id: string;
+    radiusM?: number;
 };
 
 export type ProcessingGcpCandidatesResponse = ({
@@ -636,6 +825,14 @@ export type ProcessingSavePlotBoundariesResponse = ({
     [key: string]: unknown;
 });
 
+export type ProcessingListPlotBoundariesData = {
+    id: string;
+};
+
+export type ProcessingListPlotBoundariesResponse = (Array<{
+    [key: string]: unknown;
+}>);
+
 export type ProcessingOrthomosaicInfoData = {
     id: string;
 };
@@ -644,17 +841,124 @@ export type ProcessingOrthomosaicInfoResponse = ({
     [key: string]: unknown;
 });
 
-export type ProcessingInferenceResultsData = {
+export type ProcessingMosaicPreviewData = {
     id: string;
-    model?: (string | null);
+    maxSize?: number;
 };
 
-export type ProcessingInferenceResultsResponse = ({
+export type ProcessingMosaicPreviewResponse = (unknown);
+
+export type ProcessingListOrthomosaicsData = {
+    id: string;
+};
+
+export type ProcessingListOrthomosaicsResponse = (Array<{
+    [key: string]: unknown;
+}>);
+
+export type ProcessingOrthomosaicVersionPreviewData = {
+    id: string;
+    maxSize?: number;
+    version: number;
+};
+
+export type ProcessingOrthomosaicVersionPreviewResponse = (unknown);
+
+export type ProcessingDeleteOrthomosaicData = {
+    id: string;
+    version: number;
+};
+
+export type ProcessingDeleteOrthomosaicResponse = (null);
+
+export type ProcessingActivateOrthomosaicData = {
+    id: string;
+    version: number;
+};
+
+export type ProcessingActivateOrthomosaicResponse = ({
+    [key: string]: unknown;
+});
+
+export type ProcessingRenameOrthomosaicData = {
+    id: string;
+    requestBody: RenameOrthoRequest;
+    version: number;
+};
+
+export type ProcessingRenameOrthomosaicResponse = ({
+    [key: string]: unknown;
+});
+
+export type ProcessingRenamePlotBoundaryData = {
+    id: string;
+    requestBody: RenamePlotBoundaryRequest;
+    version: number;
+};
+
+export type ProcessingRenamePlotBoundaryResponse = ({
+    [key: string]: unknown;
+});
+
+export type ProcessingDeletePlotBoundaryData = {
+    id: string;
+    version: number;
+};
+
+export type ProcessingDeletePlotBoundaryResponse = (null);
+
+export type ProcessingDownloadCropsForBoundaryData = {
+    boundaryVersion: number;
+    id: string;
+    orthoVersion: number;
+};
+
+export type ProcessingDownloadCropsForBoundaryResponse = (unknown);
+
+export type ProcessingUseUploadedOrthoData = {
+    id: string;
+};
+
+export type ProcessingUseUploadedOrthoResponse = ({
+    [key: string]: unknown;
+});
+
+export type ProcessingCheckUploadedOrthoData = {
+    id: string;
+};
+
+export type ProcessingCheckUploadedOrthoResponse = ({
+    [key: string]: unknown;
+});
+
+export type ProcessingGetInferenceResultsData = {
+    id: string;
+};
+
+export type ProcessingGetInferenceResultsResponse = (Array<{
+    [key: string]: unknown;
+}>);
+
+export type ProcessingGetStitchOutputsData = {
+    id: string;
+};
+
+export type ProcessingGetStitchOutputsResponse = ({
+    [key: string]: unknown;
+});
+
+export type ProcessingDeleteInferenceResultData = {
+    id: string;
+    label: string;
+};
+
+export type ProcessingDeleteInferenceResultResponse = ({
     [key: string]: unknown;
 });
 
 export type ProcessingDownloadCropsData = {
     id: string;
+    orthoVersion?: (number | null);
 };
 
 export type ProcessingDownloadCropsResponse = (unknown);
@@ -733,6 +1037,10 @@ export type UtilsDockerCheckResponse = ({
     [key: string]: unknown;
 });
 
+export type UtilsCapabilitiesResponse = ({
+    [key: string]: unknown;
+});
+
 export type WorkspacesCreateData = {
     requestBody: WorkspaceCreate;
 };
@@ -764,3 +1072,11 @@ export type WorkspacesDeleteData = {
 };
 
 export type WorkspacesDeleteResponse = (Message);
+
+export type WorkspacesWorkspaceCardImagesData = {
+    id: string;
+};
+
+export type WorkspacesWorkspaceCardImagesResponse = (Array<{
+    [key: string]: unknown;
+}>);

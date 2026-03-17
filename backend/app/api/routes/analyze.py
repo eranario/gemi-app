@@ -281,6 +281,7 @@ def list_trait_records(
             "population": run.population,
             "platform": run.platform,
             "sensor": run.sensor,
+            "version": record.version,
             "ortho_version": record.ortho_version,
             "ortho_name": record.ortho_name,
             "boundary_version": record.boundary_version,

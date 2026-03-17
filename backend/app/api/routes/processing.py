@@ -24,6 +24,7 @@ POST /pipeline-runs/{id}/download-crops      serve cropped images as ZIP
 
 from __future__ import annotations
 
+import csv
 import io
 import json
 import logging
@@ -308,6 +309,59 @@ def save_plot_marking(
     return {"status": "saved", "outputs": outputs}
 
 
+@router.get("/pipeline-runs/{id}/plot-marking")
+def load_plot_marking(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> dict[str, Any]:
+    """Return existing plot marking selections from plot_borders.csv, if it exists."""
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+
+    if not paths.plot_borders.exists():
+        return {"selections": []}
+
+    selections = []
+    with open(paths.plot_borders, newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            # Convert numeric fields back from strings
+            for key in ("plot_id",):
+                if key in row and row[key]:
+                    try:
+                        row[key] = int(row[key])
+                    except ValueError:
+                        pass
+            for key in ("start_lat", "start_lon", "end_lat", "end_lon"):
+                if key in row and row[key]:
+                    try:
+                        row[key] = float(row[key])
+                    except ValueError:
+                        pass
+            selections.append(dict(row))
+
+    return {"selections": selections}
+
+
+def _find_msgs_synced(paths: RunPaths) -> Path | None:
+    """
+    Locate msgs_synced.csv for Amiga/ground runs.
+    The file lives inside the extracted archive at an unpredictable depth
+    (e.g. raw/Images/RGB/Metadata/msgs_synced.csv), so we search recursively
+    before falling back to the intermediate run directory.
+    """
+    # Recursive search under raw dir first (covers Amiga nested layout)
+    found = next(paths.raw.rglob("msgs_synced.csv"), None)
+    if found:
+        return found
+    # Fallback: intermediate (aerial / pre-copied)
+    if paths.msgs_synced.exists():
+        return paths.msgs_synced
+    return None
+
+
 # ── Ground: image listing (for plot marking UI) ───────────────────────────────
 
 @router.get("/pipeline-runs/{id}/images")
@@ -327,19 +381,29 @@ def list_images(
         )
 
     exts = {f".{e.strip().lower()}" for e in extensions.split(",")}
+
+    # For Amiga/Farm-ng data the extracted images live in a nested "top" subfolder.
+    # Search recursively for a directory named "top" when the raw dir has no direct images.
+    image_dir = paths.raw
+    direct = [p for p in paths.raw.iterdir() if p.is_file() and p.suffix.lower() in exts]
+    if not direct:
+        top_dirs = list(paths.raw.rglob("top"))
+        top_dir = next((d for d in top_dirs if d.is_dir()), None)
+        if top_dir:
+            image_dir = top_dir
+
     images = sorted(
-        p for p in paths.raw.iterdir()
+        p for p in image_dir.iterdir()
         if p.is_file() and p.suffix.lower() in exts
     )
 
-    # Also check if msgs_synced.csv exists for GPS data
-    msgs_synced_path = paths.msgs_synced
-    has_gps = msgs_synced_path.exists()
+    msgs_synced_path = _find_msgs_synced(paths)
+    has_gps = msgs_synced_path is not None
 
     return {
         "images": [img.name for img in images],
         "count": len(images),
-        "raw_dir": str(paths.raw),
+        "raw_dir": str(image_dir),
         "has_gps": has_gps,
         "msgs_synced": str(msgs_synced_path) if has_gps else None,
     }
@@ -363,14 +427,7 @@ def get_gps_data(
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)
 
-    # Same fallback lookup used by ground.py stitching
-    candidates = [
-        paths.msgs_synced,
-        paths.raw / "Metadata" / "msgs_synced.csv",
-        paths.raw / "RGB" / "Metadata" / "msgs_synced.csv",
-        paths.raw / "msgs_synced.csv",
-    ]
-    csv_path = next((p for p in candidates if p.exists()), None)
+    csv_path = _find_msgs_synced(paths)
     if not csv_path:
         return {"points": [], "count": 0}
 
@@ -1937,6 +1994,37 @@ def inference_results(
         "predictions": rows,
         "images": images,
     }
+
+
+# ── Ground: stitching outputs ─────────────────────────────────────────────────
+
+@router.get("/pipeline-runs/{id}/stitch-outputs")
+def get_stitch_outputs(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> dict[str, Any]:
+    """
+    Return the list of stitched plot images produced by AgRowStitch.
+    Each entry has a name and a serve URL.
+    """
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+    outputs = run.outputs or {}
+    version = int(outputs.get("stitching_version", 1))
+    img_dir = paths.agrowstitch_dir(version)
+
+    if not img_dir.exists():
+        return {"plots": [], "version": version, "dir": str(img_dir)}
+
+    plots = []
+    for f in sorted(img_dir.glob("*.png")):
+        plots.append({
+            "name": f.name,
+            "url": f"/api/v1/files/serve?path={f}",
+        })
+
+    return {"plots": plots, "version": version, "dir": str(img_dir)}
 
 
 # ── Ground: inference results summary ────────────────────────────────────────

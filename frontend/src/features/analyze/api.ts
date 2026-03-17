@@ -68,6 +68,8 @@ export interface TraitRecord {
   population: string
   platform: string
   sensor: string
+  /** Sequential extraction version within this run (1-based) */
+  version: number
   /** Ortho version number used (aerial only) */
   ortho_version: number | null
   /** User-given name for that ortho version, if any */

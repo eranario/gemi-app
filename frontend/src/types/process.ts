@@ -33,4 +33,6 @@ export interface Process {
   link?: string
   /** Call to abort an in-progress upload */
   cancel?: () => void
+  /** Pipeline run ID — if set, ProcessContext opens its own SSE to track progress */
+  runId?: string
 }

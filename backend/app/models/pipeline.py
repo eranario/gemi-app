@@ -148,6 +148,8 @@ class TraitRecord(SQLModel, table=True):
     # Boundary version used (None = canonical Plot-Boundary-WGS84.geojson)
     boundary_version: int | None = Field(default=None)
     boundary_name: str | None = Field(default=None, max_length=255)
+    # Sequential version number within the run (1-based, auto-incremented)
+    version: int = Field(default=1)
     # Summary stats computed at extraction time
     plot_count: int = Field(default=0)
     trait_columns: list[str] = Field(default_factory=list, sa_column=Column(JSON))
