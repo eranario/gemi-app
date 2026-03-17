@@ -266,10 +266,23 @@ def run_stitching(
     pipeline = session.get(Pipeline, run.pipeline_id) if run else None
     pipeline_cfg: dict = dict(pipeline.config or {}) if pipeline else {}
 
-    # "gpu" in the UI maps to "cuda" for AgRowStitch
+    # Map UI device names to AgRowStitch device strings
     ui_device = pipeline_cfg.get("device", "cpu")
-    agrowstitch_device = "cuda" if ui_device == "gpu" else "cpu"
-    emit({"event": "progress", "message": f"Device: {ui_device} → {agrowstitch_device}"})
+    if ui_device == "gpu":
+        agrowstitch_device = "cuda"
+    elif ui_device == "multiprocessing":
+        agrowstitch_device = "multiprocessing"
+    else:
+        agrowstitch_device = "cpu"
+
+    # num_cpu: 0 means auto (os.cpu_count() - 1), otherwise use the configured value
+    cfg_num_cpu = int(pipeline_cfg.get("num_cpu", 0))
+    if cfg_num_cpu > 0:
+        cpu_count = cfg_num_cpu
+    else:
+        cpu_count = max(1, (os.cpu_count() or 1) - 1)
+
+    emit({"event": "progress", "message": f"Device: {ui_device} → {agrowstitch_device}, CPUs: {cpu_count}"})
 
     if not paths.plot_borders.exists():
         raise FileNotFoundError(
@@ -416,8 +429,6 @@ def run_stitching(
                 yaml.safe_dump(config, tmpf)
                 tmp_config = tmpf.name
 
-            cpu_count = os.cpu_count() or 1
-
             # Run AgRowStitch in a subprocess so it can be killed on stop.
             # A direct function call blocks the thread with no way to interrupt it.
             script = (
@@ -475,7 +486,25 @@ def run_stitching(
                     time.sleep(0.3)
                 drain_thread.join(timeout=5)
                 if proc.returncode != 0:
-                    raise RuntimeError(f"AgRowStitch exited with code {proc.returncode}")
+                    code = proc.returncode
+                    # Negative codes are Unix signals (e.g. -11 = SIGSEGV)
+                    if code < 0:
+                        import signal as _signal
+                        try:
+                            sig_name = _signal.Signals(-code).name
+                        except ValueError:
+                            sig_name = f"signal {-code}"
+                        if code == -11:
+                            hint = (
+                                f"AgRowStitch crashed with {sig_name} (segmentation fault / out-of-memory). "
+                                "This usually means the process ran out of RAM or VRAM. "
+                                "Try: switching to CPU (single-threaded) device, reducing the number of images, "
+                                "or adding swap space."
+                            )
+                        else:
+                            hint = f"AgRowStitch was killed by {sig_name} (exit code {code})."
+                        raise RuntimeError(hint)
+                    raise RuntimeError(f"AgRowStitch exited with code {code}")
             finally:
                 try:
                     os.unlink(tmp_config)

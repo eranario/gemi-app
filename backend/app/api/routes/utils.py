@@ -86,8 +86,10 @@ async def capabilities() -> dict:
     except ImportError:
         pass
 
+    import os as _os
     return {
         "agrowstitch": {"available": agrowstitch_available, "path": agrowstitch_path},
         "torch_version": torch_version,
         "cuda_available": cuda_available,
+        "cpu_count": _os.cpu_count() or 1,
     }

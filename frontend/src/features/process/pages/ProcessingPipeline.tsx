@@ -50,7 +50,8 @@ type Step = 1 | 2 | 3;
 
 // Step 2 config defaults per type
 const GROUND_DEFAULT_CONFIG = {
-  device: "cpu" as "cpu" | "gpu",
+  device: "cpu" as "cpu" | "gpu" | "multiprocessing",
+  num_cpu: 0,
   custom_agrowstitch_options: "",
 };
 
@@ -91,6 +92,14 @@ export function ProcessingPipeline() {
   // Step 1
   const [pipelineName, setPipelineName] = useState("");
 
+  // System capabilities (for CPU count hint)
+  const { data: capabilities } = useQuery({
+    queryKey: ["capabilities"],
+    queryFn: () => import("@/client").then((m) => m.UtilsService.capabilities()),
+    staleTime: Infinity,
+  });
+  const systemCpuCount: number = (capabilities as any)?.cpu_count ?? 0;
+
   // Step 2 — ground
   const [groundConfig, setGroundConfig] = useState(GROUND_DEFAULT_CONFIG);
 
@@ -115,7 +124,8 @@ export function ProcessingPipeline() {
     setPipelineName(existingPipeline.name);
     if (existingPipeline.type === "ground") {
       setGroundConfig({
-        device: (cfg.device as "cpu" | "gpu") ?? "cpu",
+        device: (cfg.device as "cpu" | "gpu" | "multiprocessing") ?? "cpu",
+        num_cpu: (cfg.num_cpu as number) ?? 0,
         custom_agrowstitch_options:
           (cfg.custom_agrowstitch_options as string) ?? "",
       });
@@ -493,7 +503,7 @@ export function ProcessingPipeline() {
                   <Label>Processing Device</Label>
                   <Select
                     value={groundConfig.device}
-                    onValueChange={(v: "cpu" | "gpu") =>
+                    onValueChange={(v: "cpu" | "gpu" | "multiprocessing") =>
                       setGroundConfig({ ...groundConfig, device: v })
                     }
                   >
@@ -501,15 +511,53 @@ export function ProcessingPipeline() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="cpu">CPU</SelectItem>
+                      <SelectItem value="cpu">CPU (single-threaded)</SelectItem>
+                      <SelectItem value="multiprocessing">CPU (multiprocessing)</SelectItem>
                       <SelectItem value="gpu">GPU (CUDA)</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-muted-foreground text-xs">
-                    GPU significantly speeds up AgRowStitch stitching. Stitch
-                    direction is set per-plot during the plot marking step.
+                    GPU significantly speeds up stitching. Multiprocessing runs
+                    plots in parallel across CPU cores. Stitch direction is set
+                    per-plot during the plot marking step.
                   </p>
                 </div>
+
+                {groundConfig.device === "multiprocessing" && (
+                  <div className="space-y-2">
+                    <Label>
+                      Number of CPU Workers
+                      {systemCpuCount > 0 && (
+                        <span className="text-muted-foreground ml-2 font-normal">
+                          (system has {systemCpuCount} logical cores)
+                        </span>
+                      )}
+                    </Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={systemCpuCount || undefined}
+                      placeholder={
+                        systemCpuCount > 0
+                          ? `0 = auto (${Math.max(1, systemCpuCount - 1)} cores)`
+                          : "0 = auto"
+                      }
+                      value={groundConfig.num_cpu === 0 ? "" : groundConfig.num_cpu}
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value, 10);
+                        setGroundConfig({
+                          ...groundConfig,
+                          num_cpu: isNaN(v) ? 0 : Math.max(0, v),
+                        });
+                      }}
+                    />
+                    <p className="text-muted-foreground text-xs">
+                      Leave blank (0) to use all cores minus one automatically.
+                      {systemCpuCount > 0 &&
+                        ` Max recommended: ${systemCpuCount}.`}
+                    </p>
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label>Additional AgRowStitch Options (optional)</Label>
                   <Input
@@ -665,8 +713,10 @@ export function ProcessingPipeline() {
                     {pipelineType === "ground" && (
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">Device:</span>
-                        <span className="font-medium uppercase">
-                          {groundConfig.device}
+                        <span className="font-medium">
+                          {groundConfig.device === "multiprocessing"
+                            ? `Multiprocessing (${groundConfig.num_cpu > 0 ? `${groundConfig.num_cpu} workers` : "auto"})`
+                            : groundConfig.device.toUpperCase()}
                         </span>
                       </div>
                     )}

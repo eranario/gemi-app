@@ -477,6 +477,11 @@ function MapTab({ records }: { records: TraitRecord[] }) {
     staleTime: 60_000,
   });
 
+  const selectedRecord = useMemo(
+    () => records.find((r) => r.id === selectedId) ?? null,
+    [records, selectedId],
+  );
+
   return (
     <div className="flex h-full min-h-0">
       {/* Left panel */}
@@ -537,7 +542,10 @@ function MapTab({ records }: { records: TraitRecord[] }) {
                         selectedId === r.id ? "bg-muted font-medium" : ""
                       }`}
                     >
-                      <div className="truncate">{r.date}</div>
+                      <div className="flex items-center gap-1.5 truncate">
+                        <span className="truncate">{r.date}</span>
+                        <span className="text-muted-foreground flex-shrink-0 font-mono text-[10px]">v{r.version}</span>
+                      </div>
                       <div className="text-muted-foreground mt-0.5 space-y-0.5 text-[11px]">
                         <div className="truncate">
                           <span className="text-foreground/50">Ortho:</span>{" "}
@@ -617,14 +625,22 @@ function MapTab({ records }: { records: TraitRecord[] }) {
             Loading traits…
           </div>
         ) : (
-          <TraitMap
-            geojson={traitsData?.geojson ?? null}
-            orthoInfo={orthoInfo ?? null}
-            selectedMetric={effectiveMetric}
-            filteredIds={null}
-            recordId={selectedId}
-            showPolygons={showPolygons}
-          />
+          <>
+            <TraitMap
+              geojson={traitsData?.geojson ?? null}
+              orthoInfo={orthoInfo ?? null}
+              selectedMetric={effectiveMetric}
+              filteredIds={null}
+              recordId={selectedId}
+              showPolygons={showPolygons}
+            />
+            {selectedRecord && (
+              <div className="absolute top-2 right-2 z-10 bg-background/80 backdrop-blur-sm border rounded px-2 py-1 text-xs shadow-sm space-y-0.5">
+                <div className="font-medium">{selectedRecord.date} <span className="text-muted-foreground font-mono">v{selectedRecord.version}</span></div>
+                <div className="text-muted-foreground">{selectedRecord.pipeline_name}</div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

@@ -21,8 +21,7 @@ import {
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { subscribe } from "@/lib/sseManager";
-import { save as tauriSaveDialog } from "@tauri-apps/plugin-dialog";
-import { invoke } from "@tauri-apps/api/core";
+import { downloadFile } from "@/lib/platform";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
@@ -78,17 +77,14 @@ function absoluteApiUrl(path: string): string {
   return path.startsWith("http") ? path : `${base}${path}`;
 }
 
-/** Show a Tauri save dialog then download the URL to the chosen path. Returns false if cancelled. */
+/** Download a URL — shows a native save dialog in Tauri, triggers browser download otherwise. */
 async function tauriDownload(
   url: string,
   filename: string,
   method: "GET" | "POST" = "GET",
-  filters?: { name: string; extensions: string[] }[]
+  filters?: { name: string; extensions: string[] }[],
 ): Promise<boolean> {
-  const dest = await tauriSaveDialog({ defaultPath: filename, filters });
-  if (!dest) return false;
-  await invoke("download_to_file", { url: absoluteApiUrl(url), dest, method });
-  return true;
+  return downloadFile(absoluteApiUrl(url), filename, method, filters);
 }
 
 // ── Step definitions ──────────────────────────────────────────────────────────
@@ -545,7 +541,7 @@ interface StitchPlot {
   url: string;
 }
 
-function StitchPanel({ runId }: { runId: string }) {
+function StitchPanel({ runId, isRunning }: { runId: string; isRunning: boolean }) {
   const [selected, setSelected] = useState<StitchPlot | null>(null);
 
   const { data, isLoading } = useQuery<{ plots: StitchPlot[]; version: number }>({
@@ -556,7 +552,7 @@ function StitchPanel({ runId }: { runId: string }) {
       return res.json();
     },
     staleTime: 5_000,
-    refetchInterval: 5_000,
+    refetchInterval: isRunning ? 5_000 : false,
   });
 
   if (isLoading) {
@@ -2176,15 +2172,11 @@ export function RunDetail() {
 
   async function _fetchAndTriggerDownload(
     url: string,
-    fallbackFilename: string
+    fallbackFilename: string,
   ): Promise<boolean> {
-    const dest = await tauriSaveDialog({
-      defaultPath: fallbackFilename,
-      filters: [{ name: "ZIP Archive", extensions: ["zip"] }],
-    });
-    if (!dest) return false; // user cancelled
-    await invoke("download_to_file", { url: absoluteApiUrl(url), dest });
-    return true;
+    return downloadFile(absoluteApiUrl(url), fallbackFilename, "GET", [
+      { name: "ZIP Archive", extensions: ["zip"] },
+    ]);
   }
 
   async function handleDownloadCrops(orthoVersion?: number) {
@@ -2477,7 +2469,7 @@ export function RunDetail() {
                       );
                     }
                     if (step.key === "stitching" && pipelineType === "ground") {
-                      return <StitchPanel runId={runId} />;
+                      return <StitchPanel runId={runId} isRunning={isRunning} />;
                     }
                     if (step.key === "inference" && pipelineType === "ground") {
                       return (

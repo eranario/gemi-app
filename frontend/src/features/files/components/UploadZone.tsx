@@ -1,5 +1,5 @@
 import { Upload, Image } from "lucide-react";
-import { open } from "@tauri-apps/plugin-dialog";
+import { pickFiles } from "@/lib/platform";
 
 interface UploadZoneProps {
   onFilesAdded?: (paths: string[]) => void;
@@ -7,16 +7,11 @@ interface UploadZoneProps {
 
 export function UploadZone({ onFilesAdded }: UploadZoneProps) {
   const handleClick = async () => {
-    const selected = await open({
-      multiple: true,
-      directory: false,
-    });
-
-    if (selected) {
-      const paths = Array.isArray(selected) ? selected : [selected];
-      if (paths.length > 0) {
-        onFilesAdded?.(paths);
-      }
+    const selected = await pickFiles({ multiple: true });
+    if (selected && selected.length > 0) {
+      // In Tauri, selected is string[]; in browser, File[] — extract path/name
+      const paths = selected.map((f) => (typeof f === "string" ? f : f.name));
+      onFilesAdded?.(paths);
     }
   };
 
