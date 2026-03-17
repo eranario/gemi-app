@@ -48,7 +48,9 @@ def _get_paths(session: Session, run_id: uuid.UUID) -> RunPaths:
     """Resolve RunPaths from DB for a given run."""
     from app.models.pipeline import Pipeline
 
-    run = session.get(__import__("app.models.pipeline", fromlist=["PipelineRun"]).PipelineRun, run_id)
+    run = session.get(
+        __import__("app.models.pipeline", fromlist=["PipelineRun"]).PipelineRun, run_id
+    )
     if not run:
         raise ValueError(f"Run {run_id} not found")
     pipeline = session.get(Pipeline, run.pipeline_id)
@@ -126,6 +128,7 @@ def _import_agrowstitch():
         sys.path.insert(0, str(p))
     try:
         from AgRowStitch import run as run_agrowstitch  # type: ignore
+
         return run_agrowstitch
     except ImportError:
         return None
@@ -135,6 +138,7 @@ def _import_agrowstitch():
 # The interactive part (image viewer) lives in the frontend.
 # This function is called by the POST /plot-marking endpoint to save the
 # selections as plot_borders.csv in Intermediate/.
+
 
 def _find_msgs_synced(paths: "RunPaths") -> "Path | None":
     """Locate msgs_synced.csv under the raw dir (Amiga nested layout) or intermediate."""
@@ -152,6 +156,7 @@ def _build_gps_index(msgs_synced_path: "Path") -> dict[str, tuple[float, float]]
     The Amiga CSV has a '/top/rgb_file' column with paths like '/top/rgb-123.jpg'.
     """
     import pandas as pd
+
     try:
         df = pd.read_csv(msgs_synced_path, on_bad_lines="skip")
         df.columns = df.columns.str.strip()
@@ -159,8 +164,12 @@ def _build_gps_index(msgs_synced_path: "Path") -> dict[str, tuple[float, float]]
         return {}
 
     lat_col = next((c for c in df.columns if c.lower() in ("lat", "latitude")), None)
-    lon_col = next((c for c in df.columns if c.lower() in ("lon", "lng", "longitude")), None)
-    img_col = next((c for c in df.columns if "top" in c.lower() and "file" in c.lower()), None)
+    lon_col = next(
+        (c for c in df.columns if c.lower() in ("lon", "lng", "longitude")), None
+    )
+    img_col = next(
+        (c for c in df.columns if "top" in c.lower() and "file" in c.lower()), None
+    )
     if not img_col:
         img_col = next((c for c in df.columns if "file" in c.lower()), None)
 
@@ -199,7 +208,9 @@ def save_plot_marking(
     msgs_synced = _find_msgs_synced(paths)
     if msgs_synced:
         gps_index = _build_gps_index(msgs_synced)
-        logger.info("Built GPS index with %d entries from %s", len(gps_index), msgs_synced)
+        logger.info(
+            "Built GPS index with %d entries from %s", len(gps_index), msgs_synced
+        )
 
     enriched = []
     for sel in selections:
@@ -212,18 +223,29 @@ def save_plot_marking(
             row["end_lat"], row["end_lon"] = gps_index[end_img]
         enriched.append(row)
 
-    fieldnames = ["plot_id", "start_image", "end_image",
-                  "start_lat", "start_lon", "end_lat", "end_lon", "direction"]
+    fieldnames = [
+        "plot_id",
+        "start_image",
+        "end_image",
+        "start_lat",
+        "start_lon",
+        "end_lat",
+        "end_lon",
+        "direction",
+    ]
     with open(paths.plot_borders, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(enriched)
 
-    logger.info("Saved plot_borders.csv with %d plots to %s", len(enriched), paths.plot_borders)
+    logger.info(
+        "Saved plot_borders.csv with %d plots to %s", len(enriched), paths.plot_borders
+    )
     return {"plot_marking": paths.rel(paths.plot_borders)}
 
 
 # ── Step 2: Stitching (AgRowStitch) ──────────────────────────────────────────
+
 
 def run_stitching(
     *,
@@ -231,7 +253,7 @@ def run_stitching(
     run_id: uuid.UUID,
     stop_event: threading.Event,
     emit: Callable[[dict], None],
-    agrowstitch_version: int = 1,
+    name: str | None = None,
 ) -> dict[str, Any]:
     """
     Run AgRowStitch on each plot defined in plot_borders.csv.
@@ -246,10 +268,13 @@ def run_stitching(
           full_res_mosaic_temp_plot_{id}.png
     """
     import pandas as pd
+
     try:
         import yaml
     except ImportError:
-        raise RuntimeError("PyYAML is required for stitching. Install it with: uv add pyyaml")
+        raise RuntimeError(
+            "PyYAML is required for stitching. Install it with: uv add pyyaml"
+        )
 
     agrowstitch_dir = _find_agrowstitch_dir()
     if agrowstitch_dir is None:
@@ -262,9 +287,14 @@ def run_stitching(
 
     # Load pipeline config for device setting and any custom overrides
     from app.models.pipeline import Pipeline, PipelineRun
+
     run = session.get(PipelineRun, run_id)
     pipeline = session.get(Pipeline, run.pipeline_id) if run else None
     pipeline_cfg: dict = dict(pipeline.config or {}) if pipeline else {}
+
+    # Auto-increment stitching version
+    _existing = list((run.outputs or {}).get("stitchings", []))
+    agrowstitch_version = max((s["version"] for s in _existing), default=0) + 1
 
     # Map UI device names to AgRowStitch device strings
     ui_device = pipeline_cfg.get("device", "cpu")
@@ -282,7 +312,12 @@ def run_stitching(
     else:
         cpu_count = max(1, (os.cpu_count() or 1) - 1)
 
-    emit({"event": "progress", "message": f"Device: {ui_device} → {agrowstitch_device}, CPUs: {cpu_count}"})
+    emit(
+        {
+            "event": "progress",
+            "message": f"Device: {ui_device} → {agrowstitch_device}, CPUs: {cpu_count}",
+        }
+    )
 
     if not paths.plot_borders.exists():
         raise FileNotFoundError(
@@ -299,7 +334,13 @@ def run_stitching(
     with open(paths.plot_borders) as f:
         plots = list(csv.DictReader(f))
 
-    emit({"event": "progress", "message": f"Stitching {len(plots)} plots…", "total": len(plots)})
+    emit(
+        {
+            "event": "progress",
+            "message": f"Stitching {len(plots)} plots…",
+            "total": len(plots),
+        }
+    )
 
     # Start with the vendor defaults so all required keys are present
     agrowstitch_candidates = [
@@ -312,7 +353,9 @@ def run_stitching(
         if vendor_config_path.exists():
             with open(vendor_config_path) as f:
                 base_config = yaml.safe_load(f) or {}
-            logger.info("Loaded AgRowStitch vendor defaults from %s", vendor_config_path)
+            logger.info(
+                "Loaded AgRowStitch vendor defaults from %s", vendor_config_path
+            )
             break
 
     # Allow per-pipeline overrides stored in the intermediate directory
@@ -328,9 +371,19 @@ def run_stitching(
             custom_opts = yaml.safe_load(custom_opts_str)
             if isinstance(custom_opts, dict):
                 base_config.update(custom_opts)
-                emit({"event": "progress", "message": f"Applied custom AgRowStitch options: {list(custom_opts.keys())}"})
+                emit(
+                    {
+                        "event": "progress",
+                        "message": f"Applied custom AgRowStitch options: {list(custom_opts.keys())}",
+                    }
+                )
         except Exception as e:
-            emit({"event": "progress", "message": f"Warning: could not parse custom AgRowStitch options: {e}"})
+            emit(
+                {
+                    "event": "progress",
+                    "message": f"Warning: could not parse custom AgRowStitch options: {e}",
+                }
+            )
 
     # Load msgs_synced for image filtering
     msgs_df = None
@@ -338,15 +391,15 @@ def run_stitching(
         msgs_df = pd.read_csv(msgs_path)
 
     DIRECTION_MAP = {
-        "down":  "DOWN",
-        "up":    "UP",
-        "left":  "LEFT",
+        "down": "DOWN",
+        "up": "UP",
+        "left": "LEFT",
         "right": "RIGHT",
         # legacy values from older saves
         "north_to_south": "DOWN",
         "south_to_north": "UP",
-        "east_to_west":   "LEFT",
-        "west_to_east":   "RIGHT",
+        "east_to_west": "LEFT",
+        "west_to_east": "RIGHT",
     }
 
     for i, plot in enumerate(plots):
@@ -360,15 +413,36 @@ def run_stitching(
         stitch_dir = DIRECTION_MAP.get(ui_direction, "DOWN")
 
         plot_pct = int(i / len(plots) * 100)
-        emit({"event": "progress", "index": i, "plot_id": plot_id,
-              "progress": plot_pct,
-              "message": f"Stitching plot {plot_id}/{len(plots)} | direction: {ui_direction} → {stitch_dir}"})
+        emit(
+            {
+                "event": "progress",
+                "index": i,
+                "plot_id": plot_id,
+                "progress": plot_pct,
+                "message": f"Stitching plot {plot_id}/{len(plots)} | direction: {ui_direction} → {stitch_dir}",
+            }
+        )
 
         # Gather images for this plot
         plot_temp_dir = tempfile.mkdtemp(prefix=f"agrows_plot{plot_id}_")
-        emit({"event": "progress", "message": f"Plot {plot_id}: images_dir = {images_dir}"})
-        emit({"event": "progress", "message": f"Plot {plot_id}: start='{start_img}' end='{end_img}'"})
-        emit({"event": "progress", "message": f"Plot {plot_id}: msgs_df loaded = {msgs_df is not None}"})
+        emit(
+            {
+                "event": "progress",
+                "message": f"Plot {plot_id}: images_dir = {images_dir}",
+            }
+        )
+        emit(
+            {
+                "event": "progress",
+                "message": f"Plot {plot_id}: start='{start_img}' end='{end_img}'",
+            }
+        )
+        emit(
+            {
+                "event": "progress",
+                "message": f"Plot {plot_id}: msgs_df loaded = {msgs_df is not None}",
+            }
+        )
         try:
             copied = 0
             if msgs_df is not None:
@@ -376,20 +450,43 @@ def run_stitching(
                 # start_image/end_image in plot_borders are plain basenames "rgb-123.jpg".
                 # Build a basename column for reliable range filtering.
                 rgb_col = next(
-                    (c for c in msgs_df.columns if "top" in c.lower() and "file" in c.lower()),
+                    (
+                        c
+                        for c in msgs_df.columns
+                        if "top" in c.lower() and "file" in c.lower()
+                    ),
                     None,
                 )
-                emit({"event": "progress", "message": f"Plot {plot_id}: rgb_col='{rgb_col}', msgs columns={list(msgs_df.columns[:6])}"})
+                emit(
+                    {
+                        "event": "progress",
+                        "message": f"Plot {plot_id}: rgb_col='{rgb_col}', msgs columns={list(msgs_df.columns[:6])}",
+                    }
+                )
                 if rgb_col:
                     msgs_df["_basename"] = msgs_df[rgb_col].apply(
                         lambda v: str(v).split("/")[-1] if v and str(v) != "nan" else ""
                     )
-                    sample = msgs_df["_basename"].dropna().iloc[:3].tolist() if len(msgs_df) > 0 else []
-                    emit({"event": "progress", "message": f"Plot {plot_id}: sample basenames = {sample}"})
+                    sample = (
+                        msgs_df["_basename"].dropna().iloc[:3].tolist()
+                        if len(msgs_df) > 0
+                        else []
+                    )
+                    emit(
+                        {
+                            "event": "progress",
+                            "message": f"Plot {plot_id}: sample basenames = {sample}",
+                        }
+                    )
                     # Find row indices of start and end images
                     start_mask = msgs_df["_basename"] == start_img
                     end_mask = msgs_df["_basename"] == end_img
-                    emit({"event": "progress", "message": f"Plot {plot_id}: start found={start_mask.any()}, end found={end_mask.any()}"})
+                    emit(
+                        {
+                            "event": "progress",
+                            "message": f"Plot {plot_id}: start found={start_mask.any()}, end found={end_mask.any()}",
+                        }
+                    )
                     if start_mask.any() and end_mask.any():
                         start_idx = msgs_df.index[start_mask][0]
                         end_idx = msgs_df.index[end_mask][-1]
@@ -397,25 +494,47 @@ def run_stitching(
                         if start_idx > end_idx:
                             start_idx, end_idx = end_idx, start_idx
                         plot_rows = msgs_df.loc[start_idx:end_idx]
-                        unique_basenames = list(dict.fromkeys(
-                            b for b in plot_rows["_basename"] if b
-                        ))
-                        emit({"event": "progress", "message": f"Plot {plot_id}: {len(plot_rows)} rows → {len(unique_basenames)} unique images in range"})
+                        unique_basenames = list(
+                            dict.fromkeys(b for b in plot_rows["_basename"] if b)
+                        )
+                        emit(
+                            {
+                                "event": "progress",
+                                "message": f"Plot {plot_id}: {len(plot_rows)} rows → {len(unique_basenames)} unique images in range",
+                            }
+                        )
                         for basename in unique_basenames:
                             src = images_dir / basename
                             if src.exists():
                                 shutil.copy2(src, Path(plot_temp_dir) / basename)
                                 copied += 1
-                        emit({"event": "progress", "message": f"Plot {plot_id}: {copied}/{len(unique_basenames)} files copied"})
+                        emit(
+                            {
+                                "event": "progress",
+                                "message": f"Plot {plot_id}: {copied}/{len(unique_basenames)} files copied",
+                            }
+                        )
                     else:
                         logger.warning(
                             "[Plot %s] start_image '%s' or end_image '%s' not found in msgs_synced",
-                            plot_id, start_img, end_img,
+                            plot_id,
+                            start_img,
+                            end_img,
                         )
             else:
-                emit({"event": "progress", "message": f"Plot {plot_id}: no msgs_synced — msgs_path={msgs_path}"})
+                emit(
+                    {
+                        "event": "progress",
+                        "message": f"Plot {plot_id}: no msgs_synced — msgs_path={msgs_path}",
+                    }
+                )
 
-            emit({"event": "progress", "message": f"Plot {plot_id}: total {copied} images copied to temp dir"})
+            emit(
+                {
+                    "event": "progress",
+                    "message": f"Plot {plot_id}: total {copied} images copied to temp dir",
+                }
+            )
 
             # Build config
             config = dict(base_config)
@@ -430,6 +549,16 @@ def run_stitching(
                 tmp_config = tmpf.name
 
             # Run AgRowStitch in a subprocess so it can be killed on stop.
+            # Use a dedicated AgRowStitch venv if present (allows pinning
+            # opencv-contrib-python==4.7.0.72 without affecting the main backend).
+            # Create it with:
+            #   python3 -m venv backend/vendor/AgRowStitch/.venv
+            #   .venv/bin/pip install opencv-contrib-python==4.7.0.72 numpy==1.26.4 torch torchvision pyyaml
+            #   .venv/bin/pip install -e backend/vendor/LightGlue
+            _agrows_venv_python = agrowstitch_dir / ".venv" / "bin" / "python"
+            _python = str(_agrows_venv_python) if _agrows_venv_python.exists() else sys.executable
+            emit({"event": "progress", "message": f"Using Python: {_python}"})
+
             # A direct function call blocks the thread with no way to interrupt it.
             script = (
                 f"import sys; sys.path.insert(0, {str(agrowstitch_dir)!r}); "
@@ -438,38 +567,133 @@ def run_stitching(
                 f"[None for _ in r] if hasattr(r, '__iter__') and not isinstance(r, (str, bytes)) else None"
             )
             proc = subprocess.Popen(
-                [sys.executable, "-c", script],
+                [_python, "-c", script],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
             )
 
+            # Resource snapshot helper — emits RAM + VRAM in one line
+            def _emit_resources(_emit):
+                parts = []
+                # RAM via psutil or /proc/meminfo
+                try:
+                    import psutil as _psutil
+
+                    vm = _psutil.virtual_memory()
+                    parts.append(
+                        f"RAM: {vm.used // 1024 // 1024}/{vm.total // 1024 // 1024} MiB"
+                        f" ({vm.percent:.0f}%)"
+                    )
+                except ImportError:
+                    try:
+                        meminfo = {}
+                        with open("/proc/meminfo") as _f:
+                            for _line in _f:
+                                k, v = _line.split(":")
+                                meminfo[k.strip()] = int(v.split()[0])
+                        total_mb = meminfo["MemTotal"] // 1024
+                        avail_mb = meminfo["MemAvailable"] // 1024
+                        used_mb = total_mb - avail_mb
+                        parts.append(
+                            f"RAM: {used_mb}/{total_mb} MiB ({used_mb / total_mb * 100:.0f}%)"
+                        )
+                    except Exception:
+                        pass
+                # VRAM via nvidia-smi
+                try:
+                    import shutil as _shutil
+
+                    if _shutil.which("nvidia-smi"):
+                        out = subprocess.check_output(
+                            [
+                                "nvidia-smi",
+                                "--query-gpu=memory.used,memory.total,utilization.gpu",
+                                "--format=csv,noheader,nounits",
+                            ],
+                            stderr=subprocess.DEVNULL,
+                            text=True,
+                        ).strip()
+                        for gpu_idx, line in enumerate(out.splitlines()):
+                            p = [x.strip() for x in line.split(",")]
+                            if len(p) >= 2:
+                                util = f", util: {p[2]}%" if len(p) >= 3 else ""
+                                parts.append(
+                                    f"VRAM GPU{gpu_idx}: {p[0]}/{p[1]} MiB{util}"
+                                )
+                except Exception:
+                    pass
+                if parts:
+                    _emit({"event": "progress", "message": "  ".join(parts)})
+
+            # Snapshot immediately before launch
+            _emit_resources(emit)
+
+            # Monitor thread — polls every 0.5 s while the subprocess runs
+            _res_stop = threading.Event()
+
+            def _monitor_resources(_emit, _stop):
+                while not _stop.wait(5.0):
+                    _emit_resources(_emit)
+
+            vram_thread = threading.Thread(
+                target=_monitor_resources,
+                args=(emit, _res_stop),
+                daemon=True,
+            )
+            _vram_stop = _res_stop  # alias so existing stop calls still work
+            vram_thread.start()
+
             # Drain stdout in a background thread so readline() never blocks
             # the stop-event polling loop below.
             import re as _re
+
             _total_plots = len(plots)
             _plot_index = i
             _total_images = copied  # images copied into temp dir
 
-            def _drain(pipe, _emit, _plot_id, _pi, _np, _ni):
+            _last_lines: list[str] = []
+
+            def _drain(pipe, _emit, _plot_id, _pi, _np, _ni, _buf):
                 for line in pipe:
                     line = line.rstrip()
                     if not line.strip():
                         continue
+                    _buf.append(line)
+                    if len(_buf) > 20:
+                        _buf.pop(0)
                     # Parse "Starting new batch with image N" for intra-plot progress
                     m = _re.search(r"Starting new batch with image (\d+)", line)
                     if m and _ni > 0:
                         batch_img = int(m.group(1))
                         intra = batch_img / _ni  # 0.0–1.0 within this plot
                         pct = int((_pi + intra) / _np * 100)
-                        _emit({"event": "progress", "progress": pct,
-                               "message": f"[AgRowStitch plot {_plot_id}] {line}"})
+                        _emit(
+                            {
+                                "event": "progress",
+                                "progress": pct,
+                                "message": f"[AgRowStitch plot {_plot_id}] {line}",
+                            }
+                        )
                     else:
-                        _emit({"event": "progress", "message": f"[AgRowStitch plot {_plot_id}] {line}"})
+                        _emit(
+                            {
+                                "event": "progress",
+                                "message": f"[AgRowStitch plot {_plot_id}] {line}",
+                            }
+                        )
 
             drain_thread = threading.Thread(
                 target=_drain,
-                args=(proc.stdout, emit, plot_id, _plot_index, _total_plots, _total_images),
+                args=(
+                    proc.stdout,
+                    emit,
+                    plot_id,
+                    _plot_index,
+                    _total_plots,
+                    _total_images,
+                    _last_lines,
+                ),
                 daemon=True,
             )
             drain_thread.start()
@@ -478,34 +702,41 @@ def run_stitching(
                 # Poll until done, checking stop every 0.3 s
                 while proc.poll() is None:
                     if stop_event.is_set():
-                        emit({"event": "progress", "message": f"Plot {plot_id}: stop requested — killing process"})
+                        emit(
+                            {
+                                "event": "progress",
+                                "message": f"Plot {plot_id}: stop requested — killing process",
+                            }
+                        )
                         proc.kill()
                         proc.wait()
                         drain_thread.join(timeout=2)
+                        _vram_stop.set()
+                        vram_thread.join(timeout=2)
                         return {}
                     time.sleep(0.3)
+                _vram_stop.set()
+                vram_thread.join(timeout=2)
                 drain_thread.join(timeout=5)
                 if proc.returncode != 0:
                     code = proc.returncode
                     # Negative codes are Unix signals (e.g. -11 = SIGSEGV)
                     if code < 0:
                         import signal as _signal
+
                         try:
                             sig_name = _signal.Signals(-code).name
                         except ValueError:
                             sig_name = f"signal {-code}"
                         if code == -11:
-                            hint = (
-                                f"AgRowStitch crashed with {sig_name} (segmentation fault / out-of-memory). "
-                                "This usually means the process ran out of RAM or VRAM. "
-                                "Try: switching to CPU (single-threaded) device, reducing the number of images, "
-                                "or adding swap space."
-                            )
+                            tail = "\n".join(f"  {l}" for l in _last_lines[-5:]) if _last_lines else "  (no output)"
+                            hint = f"AgRowStitch crashed with {sig_name}.\n\nLast output:\n{tail}"
                         else:
                             hint = f"AgRowStitch was killed by {sig_name} (exit code {code})."
                         raise RuntimeError(hint)
                     raise RuntimeError(f"AgRowStitch exited with code {code}")
             finally:
+                _vram_stop.set()
                 try:
                     os.unlink(tmp_config)
                 except OSError:
@@ -513,7 +744,10 @@ def run_stitching(
 
             # Find output file — AgRowStitch writes to plot_temp_dir or a subdirectory
             output_png = None
-            for search_dir in [Path(plot_temp_dir), Path(plot_temp_dir).parent / "final_mosaics"]:
+            for search_dir in [
+                Path(plot_temp_dir),
+                Path(plot_temp_dir).parent / "final_mosaics",
+            ]:
                 if not search_dir.exists():
                     continue
                 patterns = [
@@ -522,7 +756,9 @@ def run_stitching(
                     "full_res_mosaic",
                 ]
                 for pat in patterns:
-                    matches = list(search_dir.glob(f"{pat}*.png")) + list(search_dir.glob(f"{pat}*.tif"))
+                    matches = list(search_dir.glob(f"{pat}*.png")) + list(
+                        search_dir.glob(f"{pat}*.tif")
+                    )
                     if matches:
                         output_png = matches[0]
                         break
@@ -530,23 +766,47 @@ def run_stitching(
                     break
 
             if output_png and output_png.exists():
-                dest = out_dir / f"full_res_mosaic_temp_plot_{plot_id}{output_png.suffix}"
+                dest = (
+                    out_dir / f"full_res_mosaic_temp_plot_{plot_id}{output_png.suffix}"
+                )
                 shutil.copy2(output_png, dest)
                 logger.info("[Plot %s] Stitched → %s", plot_id, dest.name)
             else:
-                logger.warning("[Plot %s] No stitched output found in %s", plot_id, plot_temp_dir)
+                logger.warning(
+                    "[Plot %s] No stitched output found in %s", plot_id, plot_temp_dir
+                )
 
         finally:
             shutil.rmtree(plot_temp_dir, ignore_errors=True)
 
-    emit({"event": "progress", "progress": 100, "message": f"Stitching complete — {len(plots)} plot(s) processed"})
+    emit(
+        {
+            "event": "progress",
+            "progress": 100,
+            "message": f"Stitching complete — {len(plots)} plot(s) processed",
+        }
+    )
+
+    # Build stored config (drop temp runtime keys)
+    stored_config = dict(base_config)
+    stored_config.pop("image_directory", None)
+
+    from datetime import datetime, timezone as _tz
     return {
-        "stitching": paths.rel(out_dir),
+        "_stitch_new_entry": {
+            "version": agrowstitch_version,
+            "name": name,
+            "dir": paths.rel(out_dir),
+            "config": stored_config,
+            "plot_count": len(plots),
+            "created_at": datetime.now(_tz.utc).isoformat(),
+        },
         "stitching_version": agrowstitch_version,
     }
 
 
 # ── Step 3: Georeferencing ────────────────────────────────────────────────────
+
 
 def run_georeferencing(
     *,
@@ -554,7 +814,6 @@ def run_georeferencing(
     run_id: uuid.UUID,
     stop_event: threading.Event,
     emit: Callable[[dict], None],
-    agrowstitch_version: int = 1,
 ) -> dict[str, Any]:
     """
     Georeference stitched plot PNGs using GPS data from msgs_synced.csv.
@@ -572,8 +831,11 @@ def run_georeferencing(
     """
     import pandas as pd
     from app.processing.geo_utils import georeference_plot, combine_utm_tiffs_to_mosaic
+    from app.models.pipeline import PipelineRun
 
     paths = _get_paths(session, run_id)
+    run = session.get(PipelineRun, run_id)
+    agrowstitch_version = int((run.outputs or {}).get("stitching_version", 1))
     out_dir = paths.agrowstitch_dir(agrowstitch_version)
 
     if not out_dir.exists():
@@ -611,8 +873,13 @@ def run_georeferencing(
     if not plot_pngs:
         raise FileNotFoundError(f"No stitched plot images found in {out_dir}")
 
-    emit({"event": "progress", "message": f"Georeferencing {len(plot_pngs)} plots…",
-          "total": len(plot_pngs)})
+    emit(
+        {
+            "event": "progress",
+            "message": f"Georeferencing {len(plot_pngs)} plots…",
+            "total": len(plot_pngs),
+        }
+    )
 
     plot_ids = []
     for i, png in enumerate(plot_pngs):
@@ -622,7 +889,13 @@ def run_georeferencing(
         # Extract plot_id from filename
         stem = png.stem  # e.g. full_res_mosaic_temp_plot_3
         plot_id_str = stem.split("_")[-1]
-        emit({"event": "progress", "index": i, "message": f"Georeferencing plot {plot_id_str}"})
+        emit(
+            {
+                "event": "progress",
+                "index": i,
+                "message": f"Georeferencing plot {plot_id_str}",
+            }
+        )
 
         # Filter msgs_df to the rows for this plot
         if rgb_col and paths.plot_borders.exists():
@@ -641,11 +914,17 @@ def run_georeferencing(
             plot_df = msgs_df.copy()
 
         if len(plot_df) < 2:
-            logger.warning("[Plot %s] Only %d GPS rows — skipping georeferencing", plot_id_str, len(plot_df))
+            logger.warning(
+                "[Plot %s] Only %d GPS rows — skipping georeferencing",
+                plot_id_str,
+                len(plot_df),
+            )
             continue
 
         ui_direction = plot_directions.get(plot_id_str, "down")
-        success = georeference_plot(plot_id_str, plot_df, out_dir, ui_direction=ui_direction)
+        success = georeference_plot(
+            plot_id_str, plot_df, out_dir, ui_direction=ui_direction
+        )
         if success:
             plot_ids.append(plot_id_str)
         else:
@@ -659,6 +938,7 @@ def run_georeferencing(
 
     emit({"event": "progress", "message": "Building plot boundary GeoJSON…"})
     from app.processing.geo_utils import build_plot_boundaries_geojson
+
     geojson_path = build_plot_boundaries_geojson(
         out_dir=out_dir,
         plot_ids=plot_ids,
@@ -673,6 +953,7 @@ def run_georeferencing(
 
 # ── Step 4: Inference (Roboflow) ─────────────────────────────────────────────
 
+
 def run_inference(
     *,
     session: Session,
@@ -680,7 +961,6 @@ def run_inference(
     stop_event: threading.Event,
     emit: Callable[[dict], None],
     models: list[dict],
-    agrowstitch_version: int = 1,
 ) -> dict[str, Any]:
     """
     Run Roboflow inference on stitched plot images using one or more model configs.
@@ -701,7 +981,11 @@ def run_inference(
     if not models:
         raise ValueError("No inference models provided.")
 
+    from app.models.pipeline import PipelineRun
+
     paths = _get_paths(session, run_id)
+    run = session.get(PipelineRun, run_id)
+    agrowstitch_version = int((run.outputs or {}).get("stitching_version", 1))
     out_dir = paths.agrowstitch_dir(agrowstitch_version)
 
     if not out_dir.exists():
@@ -726,8 +1010,13 @@ def run_inference(
         model_id = model.get("roboflow_model_id", "")
         task_type = model.get("task_type", "detection")
 
-        emit({"event": "progress", "message": f"[{label}] Running on {len(plot_images)} plots…",
-              "total": len(plot_images)})
+        emit(
+            {
+                "event": "progress",
+                "message": f"[{label}] Running on {len(plot_images)} plots…",
+                "total": len(plot_images),
+            }
+        )
 
         safe_label = "".join(c if c.isalnum() or c in "-_" else "_" for c in label)
         predictions_path = out_dir / f"roboflow_predictions_{safe_label}.csv"
@@ -737,7 +1026,9 @@ def run_inference(
             if stop_event.is_set():
                 return {}
             emit({"event": "progress", "index": i, "message": f"[{label}] {img.name}"})
-            preds = run_inference_on_image(img, api_key=api_key, model_id=model_id, task_type=task_type)
+            preds = run_inference_on_image(
+                img, api_key=api_key, model_id=model_id, task_type=task_type
+            )
             for p in preds:
                 p["image"] = img.name
             all_rows.extend(preds)
@@ -748,7 +1039,12 @@ def run_inference(
             writer.writerows(all_rows)
 
         inference_paths[label] = paths.rel(predictions_path)
-        logger.info("[%s] Wrote %d predictions → %s", label, len(all_rows), predictions_path.name)
+        logger.info(
+            "[%s] Wrote %d predictions → %s",
+            label,
+            len(all_rows),
+            predictions_path.name,
+        )
 
     return {"inference": inference_paths}
 
@@ -756,6 +1052,7 @@ def run_inference(
 # ── Binary extraction (.bin → images) ────────────────────────────────────────
 # Called from the upload endpoint when .bin files are detected.
 # Runs as a background task; progress tracked via the same SSE mechanism.
+
 
 def _import_extract_binary():
     """
@@ -768,11 +1065,13 @@ def _import_extract_binary():
     """
     try:
         from bin_to_images.bin_to_images import extract_binary  # type: ignore
+
         return extract_binary
     except ImportError:
         pass
     try:
         from bin_to_images import extract_binary  # type: ignore
+
         return extract_binary
     except ImportError:
         pass
@@ -788,6 +1087,7 @@ def _import_extract_binary():
             sys.path.insert(0, p)
             try:
                 from bin_to_images.bin_to_images import extract_binary  # type: ignore
+
                 return extract_binary
             except ImportError:
                 continue

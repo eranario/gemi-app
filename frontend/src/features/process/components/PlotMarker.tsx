@@ -20,6 +20,7 @@ import {
   AlertCircle,
   Map,
   Plus,
+  Trash2,
   X,
 } from "lucide-react"
 import { useState, useEffect, useCallback, useRef } from "react"
@@ -239,8 +240,8 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
   const [plots, setPlots] = useState<PlotSelection[]>(makePlots(1))
   // which plot page we're viewing (0-indexed into plots array)
   const [plotPage, setPlotPage] = useState(0)
-  // editable total-plots input
-  const [totalInput, setTotalInput] = useState("1")
+  // editable nav input (shows current plot number, used to jump)
+  const [plotNavInput, setPlotNavInput] = useState("1")
 
   // Load existing selections when data arrives
   useEffect(() => {
@@ -252,34 +253,27 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
         direction: s.direction ?? "down",
       }))
       setPlots(loaded)
-      setTotalInput(String(loaded.length))
+      setPlotNavInput("1")
       setPlotPage(0)
     }
   }, [existingData])
 
+  // Keep nav input in sync when plotPage changes externally (arrows, dot strip, etc.)
+  useEffect(() => {
+    setPlotNavInput(String(plotPage + 1))
+  }, [plotPage])
+
   const activePlot = plots[plotPage] ?? null
   const currentImage = images[currentIdx] ?? null
 
-  // When total input changes, resize the plots array
-  const applyTotal = (val: string) => {
+  // Navigate to a specific plot by 1-based number
+  const applyNav = (val: string) => {
     const n = parseInt(val)
-    if (!n || n < 1 || n > 999) return
-    setPlots((prev) => {
-      if (n === prev.length) return prev
-      if (n > prev.length) {
-        return [
-          ...prev,
-          ...Array.from({ length: n - prev.length }, (_, i) => ({
-            plot_id: prev.length + i + 1,
-            start_image: null,
-            end_image: null,
-            direction: "north_to_south",
-          })),
-        ]
-      }
-      return prev.slice(0, n)
-    })
-    setPlotPage((p) => Math.min(p, n - 1))
+    if (!n || n < 1 || n > plots.length) {
+      setPlotNavInput(String(plotPage + 1))
+      return
+    }
+    setPlotPage(n - 1)
   }
 
   const prev = useCallback(() => setCurrentIdx((i) => Math.max(0, i - 1)), [])
@@ -318,11 +312,21 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
     setPlots((prev) => {
       const newId = prev.length + 1
       const updated = [...prev, { plot_id: newId, start_image: null, end_image: null, direction: "down" }]
-      setTotalInput(String(updated.length))
       setPlotPage(updated.length - 1)
       return updated
     })
   }, [])
+
+  const deletePlot = useCallback(() => {
+    setPlots((prev) => {
+      if (prev.length <= 1) return prev
+      const updated = prev
+        .filter((_, i) => i !== plotPage)
+        .map((p, i) => ({ ...p, plot_id: i + 1 }))
+      setPlotPage((p) => Math.min(p, updated.length - 1))
+      return updated
+    })
+  }, [plotPage])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -333,10 +337,11 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
       if (e.key === "s" || e.key === "S") { e.preventDefault(); markStart() }
       if (e.key === "e" || e.key === "E") { e.preventDefault(); markEnd() }
       if (e.key === "n" || e.key === "N") { e.preventDefault(); addPlot() }
+      if (e.key === "d" || e.key === "D") { e.preventDefault(); deletePlot() }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [prev, next, markStart, markEnd, addPlot])
+  }, [prev, next, markStart, markEnd, addPlot, deletePlot])
 
   const incomplete = plots.filter((p) => !p.start_image || !p.end_image)
   const canSave = incomplete.length === 0 && plots.length > 0
@@ -390,7 +395,8 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
           <kbd className="bg-background border rounded px-1 ml-1">→</kbd> navigate ·{" "}
           <kbd className="bg-background border rounded px-1">S</kbd> start ·{" "}
           <kbd className="bg-background border rounded px-1">E</kbd> end ·{" "}
-          <kbd className="bg-background border rounded px-1">N</kbd> new plot
+          <kbd className="bg-background border rounded px-1">N</kbd> new plot ·{" "}
+          <kbd className="bg-background border rounded px-1">D</kbd> delete plot
         </span>
         <button
           onClick={() => setShowGps((v) => !v)}
@@ -487,19 +493,20 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
         {/* ── Right: plot pager ── */}
         <div className="space-y-3">
 
-          {/* Total plots control */}
+          {/* Plot navigation + add/delete */}
           <div className="flex items-center gap-2">
-            <Label className="text-xs text-muted-foreground whitespace-nowrap">Plots</Label>
+            <Label className="text-xs text-muted-foreground whitespace-nowrap">Plot</Label>
             <Input
               type="number"
               min={1}
-              max={999}
-              value={totalInput}
-              className="h-7 text-xs w-16"
-              onChange={(e) => setTotalInput(e.target.value)}
-              onBlur={() => applyTotal(totalInput)}
-              onKeyDown={(e) => { if (e.key === "Enter") applyTotal(totalInput) }}
+              max={plots.length}
+              value={plotNavInput}
+              className="h-7 text-xs w-14"
+              onChange={(e) => setPlotNavInput(e.target.value)}
+              onBlur={() => applyNav(plotNavInput)}
+              onKeyDown={(e) => { if (e.key === "Enter") applyNav(plotNavInput) }}
             />
+            <span className="text-xs text-muted-foreground">/ {plots.length}</span>
             <Button
               variant="outline"
               size="icon"
@@ -508,6 +515,16 @@ export function PlotMarker({ runId, onSaved: _onSaved, onCancel }: PlotMarkerPro
               onClick={addPlot}
             >
               <Plus className="w-3.5 h-3.5" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground hover:text-destructive hover:border-destructive"
+              title="Delete current plot (D)"
+              onClick={deletePlot}
+              disabled={plots.length <= 1}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
             </Button>
             <span className="text-xs text-muted-foreground ml-auto">
               {doneCount}/{plots.length} done

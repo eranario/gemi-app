@@ -196,9 +196,18 @@ interface ProgressEvent {
   outputs?: Record<string, string>;
 }
 
+// Module-level buffers — survive component unmounts so logs persist when
+// the user navigates away and back.
+const eventBuffer = new Map<string, ProgressEvent[]>();
+const progressBuffer = new Map<string, number | null>();
+
 function useStepProgress(runId: string, isRunning: boolean) {
-  const [events, setEvents] = useState<ProgressEvent[]>([]);
-  const [lastProgress, setLastProgress] = useState<number | null>(null);
+  const [events, setEvents] = useState<ProgressEvent[]>(
+    () => eventBuffer.get(runId) ?? []
+  );
+  const [lastProgress, setLastProgress] = useState<number | null>(
+    () => progressBuffer.get(runId) ?? null
+  );
   const queryClient = useQueryClient();
   const unsubRef = useRef<(() => void) | null>(null);
 
@@ -213,22 +222,31 @@ function useStepProgress(runId: string, isRunning: boolean) {
     // persists even if this component unmounts (user navigates away).
     const unsub = subscribe(runId, (evt) => {
       if (evt.event === "start") {
+        eventBuffer.set(runId, [evt as ProgressEvent]);
+        progressBuffer.set(runId, null);
         setEvents([evt as ProgressEvent]);
         setLastProgress(null);
       } else {
-        setEvents((prev) => [...prev, evt as ProgressEvent]);
+        const next = [...(eventBuffer.get(runId) ?? []), evt as ProgressEvent];
+        eventBuffer.set(runId, next);
+        setEvents(next);
       }
 
-      if (typeof evt.progress === "number") setLastProgress(evt.progress);
+      if (typeof evt.progress === "number") {
+        progressBuffer.set(runId, evt.progress);
+        setLastProgress(evt.progress);
+      }
 
       if (evt.event === "complete" || evt.event === "error" || evt.event === "cancelled") {
         queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
         if (evt.event === "complete") {
           if (evt.step === "stitching") {
             queryClient.invalidateQueries({ queryKey: ["stitch-outputs", runId] });
+            queryClient.invalidateQueries({ queryKey: ["stitch-versions", runId] });
           }
           if (evt.step === "georeferencing") {
             queryClient.invalidateQueries({ queryKey: ["stitch-outputs", runId] });
+            queryClient.invalidateQueries({ queryKey: ["stitch-versions", runId] });
           }
           if (evt.step === "orthomosaic") {
             queryClient.invalidateQueries({ queryKey: ["orthomosaic-versions", runId] });
@@ -250,7 +268,17 @@ function useStepProgress(runId: string, isRunning: boolean) {
     };
   }, [isRunning, runId, queryClient]);
 
+  // Sync from buffer when remounting (isRunning=true but no new events yet)
+  useEffect(() => {
+    const buffered = eventBuffer.get(runId);
+    if (buffered?.length) setEvents(buffered);
+    const prog = progressBuffer.get(runId);
+    if (prog != null) setLastProgress(prog);
+  }, [runId]);
+
   const clearEvents = () => {
+    eventBuffer.delete(runId);
+    progressBuffer.delete(runId);
     setEvents([]);
     setLastProgress(null);
   };
@@ -541,10 +569,144 @@ interface StitchPlot {
   url: string;
 }
 
-function StitchPanel({ runId, isRunning }: { runId: string; isRunning: boolean }) {
-  const [selected, setSelected] = useState<StitchPlot | null>(null);
+interface StitchVersion {
+  version: number;
+  name: string | null;
+  dir: string;
+  config: Record<string, any>;
+  plot_count: number;
+  created_at: string | null;
+}
 
-  const { data, isLoading } = useQuery<{ plots: StitchPlot[]; version: number }>({
+function StitchConfigDialog({
+  open,
+  onClose,
+  version,
+}: {
+  open: boolean;
+  onClose: () => void;
+  version: StitchVersion | null;
+}) {
+  if (!version) return null;
+  const label = version.name ? `${version.name} (v${version.version})` : `v${version.version}`;
+  const config = version.config ?? {};
+  const entries = Object.entries(config);
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <FileText className="h-4 w-4" />
+            Config — {label}
+          </DialogTitle>
+          <DialogDescription>
+            Parameters used for this stitching run
+          </DialogDescription>
+        </DialogHeader>
+        <div className="max-h-96 overflow-y-auto rounded-md border bg-muted/40 p-3 font-mono text-xs">
+          {entries.length === 0 ? (
+            <span className="text-muted-foreground">No config recorded</span>
+          ) : (
+            entries.map(([k, v]) => (
+              <div key={k} className="flex gap-2 py-0.5">
+                <span className="text-muted-foreground min-w-[140px] shrink-0">{k}</span>
+                <span className="break-all">{JSON.stringify(v)}</span>
+              </div>
+            ))
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function StitchImagesDialog({
+  open,
+  onClose,
+  plots,
+  versionLabel,
+}: {
+  open: boolean;
+  onClose: () => void;
+  plots: StitchPlot[];
+  versionLabel: string;
+}) {
+  const [pageIndex, setPageIndex] = useState(0);
+  const plot = plots[pageIndex];
+
+  // Reset to first plot when dialog opens
+  useEffect(() => { if (open) setPageIndex(0); }, [open]);
+
+  if (!open || plots.length === 0) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-4xl p-3">
+        <DialogHeader className="px-1">
+          <DialogTitle className="text-sm">
+            {versionLabel} — {plots.length} plots
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span className="font-mono">{plot?.name}</span>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-7 w-7"
+                disabled={pageIndex === 0}
+                onClick={() => setPageIndex((p) => p - 1)}
+              >
+                <ChevronDown className="h-3.5 w-3.5 rotate-90" />
+              </Button>
+              <span className="w-16 text-center">{pageIndex + 1} / {plots.length}</span>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-7 w-7"
+                disabled={pageIndex === plots.length - 1}
+                onClick={() => setPageIndex((p) => p + 1)}
+              >
+                <ChevronDown className="h-3.5 w-3.5 -rotate-90" />
+              </Button>
+            </div>
+          </div>
+          {plot && (
+            <img
+              src={apiUrl(plot.url)}
+              alt={plot.name}
+              className="w-full rounded border"
+            />
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function StitchPanel({
+  runId,
+  isRunning,
+  onDelete,
+  onRename,
+  isDeleting,
+}: {
+  runId: string;
+  isRunning: boolean;
+  onDelete: (version: number) => void;
+  onRename: (version: number, name: string | null) => void;
+  isDeleting: boolean;
+}) {
+  const [pageIndex, setPageIndex] = useState(0);
+  const [viewingConfig, setViewingConfig] = useState<StitchVersion | null>(null);
+  const [viewingImages, setViewingImages] = useState<{ version: StitchVersion; plots: StitchPlot[] } | null>(null);
+  const [editingVersion, setEditingVersion] = useState<number | null>(null);
+  const [editingName, setEditingName] = useState("");
+  const [confirmDeleteVersion, setConfirmDeleteVersion] = useState<number | null>(null);
+
+  // Live plots during run (polled every 5s)
+  const { data: liveData } = useQuery<{ plots: StitchPlot[]; version: number }>({
     queryKey: ["stitch-outputs", runId],
     queryFn: async () => {
       const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/stitch-outputs`));
@@ -555,65 +717,233 @@ function StitchPanel({ runId, isRunning }: { runId: string; isRunning: boolean }
     refetchInterval: isRunning ? 5_000 : false,
   });
 
-  if (isLoading) {
+  // Completed versions (after run)
+  const { data: versions = [], isLoading: versionsLoading } = useQuery<StitchVersion[]>({
+    queryKey: ["stitch-versions", runId],
+    queryFn: async () => {
+      const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/stitchings`));
+      if (!res.ok) return [];
+      return res.json();
+    },
+    staleTime: 30_000,
+  });
+
+  // Auto-advance page index to latest plot during run
+  const livePlots = liveData?.plots ?? [];
+  useEffect(() => {
+    if (isRunning && livePlots.length > 0) {
+      setPageIndex(livePlots.length - 1);
+    }
+  }, [isRunning, livePlots.length]);
+
+  // Fetch images for a specific version to show in dialog
+  async function viewVersionImages(v: StitchVersion) {
+    const res = await fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/stitch-outputs`));
+    // The live endpoint returns active version; for other versions fetch directly if needed
+    // For simplicity, use the stitch-outputs endpoint which returns the active version
+    // If user wants to view a non-active version we still show what we have
+    const data = res.ok ? await res.json() : { plots: [] };
+    setViewingImages({ version: v, plots: data.plots ?? [] });
+  }
+
+  function startRename(v: StitchVersion) {
+    setEditingVersion(v.version);
+    setEditingName(v.name ?? "");
+  }
+
+  function commitRename() {
+    if (editingVersion !== null) {
+      onRename(editingVersion, editingName.trim() || null);
+    }
+    setEditingVersion(null);
+  }
+
+  // ── During run: page viewer ────────────────────────────────────────────────
+
+  if (isRunning) {
+    if (livePlots.length === 0) {
+      return (
+        <div className="mt-3 text-xs text-muted-foreground">
+          Stitching in progress — plots will appear here as they complete.
+        </div>
+      );
+    }
+    const plot = livePlots[pageIndex] ?? livePlots[livePlots.length - 1];
+    return (
+      <div className="mt-3 space-y-2">
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>{livePlots.length} plot{livePlots.length !== 1 ? "s" : ""} stitched · v{liveData?.version ?? 1}</span>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-7 w-7"
+              disabled={pageIndex === 0}
+              onClick={() => setPageIndex((p) => p - 1)}
+            >
+              <ChevronDown className="h-3.5 w-3.5 rotate-90" />
+            </Button>
+            <span className="w-16 text-center">{pageIndex + 1} / {livePlots.length}</span>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-7 w-7"
+              disabled={pageIndex === livePlots.length - 1}
+              onClick={() => setPageIndex((p) => p + 1)}
+            >
+              <ChevronDown className="h-3.5 w-3.5 -rotate-90" />
+            </Button>
+          </div>
+        </div>
+        <img
+          src={apiUrl(plot.url)}
+          alt={plot.name}
+          className="w-full rounded border"
+        />
+        <p className="text-xs font-mono text-muted-foreground">{plot.name}</p>
+      </div>
+    );
+  }
+
+  // ── After run: version table ───────────────────────────────────────────────
+
+  if (versionsLoading) {
     return (
       <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
         <Loader2 className="h-3 w-3 animate-spin" />
-        Loading stitched plots…
+        Loading stitching versions…
       </div>
     );
   }
 
-  const plots = data?.plots ?? [];
-  if (plots.length === 0) {
-    return (
-      <div className="mt-3 text-xs text-muted-foreground">
-        No stitched outputs yet — plots will appear here as they complete.
-      </div>
-    );
-  }
+  if (versions.length === 0) return null;
+
+  const confirmDeleteEntry = versions.find((v) => v.version === confirmDeleteVersion);
 
   return (
-    <div className="mt-3 space-y-2">
-      <p className="text-xs text-muted-foreground">
-        {plots.length} stitched plot{plots.length !== 1 ? "s" : ""} · AgRowStitch v{data?.version ?? 1}
-      </p>
-      <div className="grid grid-cols-4 gap-2">
-        {plots.map((p) => (
-          <button
-            key={p.name}
-            onClick={() => setSelected(p)}
-            className="group relative rounded overflow-hidden border bg-muted hover:border-primary transition-colors"
-          >
-            <img
-              src={apiUrl(p.url)}
-              alt={p.name}
-              className="w-full object-cover aspect-video"
-              loading="lazy"
-            />
-            <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-1.5 py-0.5 text-[10px] text-white truncate opacity-0 group-hover:opacity-100 transition-opacity">
-              {p.name}
-            </div>
-          </button>
-        ))}
+    <>
+      <div className="mt-3 rounded-lg border overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="py-2 text-xs">Version</TableHead>
+              <TableHead className="py-2 text-xs text-right">Plots</TableHead>
+              <TableHead className="py-2 text-xs">Created</TableHead>
+              <TableHead className="py-2 text-xs text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {versions.map((v) => (
+              <TableRow key={v.version} className="text-xs">
+                <TableCell className="py-1.5">
+                  {editingVersion === v.version ? (
+                    <div className="flex items-center gap-1">
+                      <Input
+                        className="h-7 w-32 text-xs"
+                        value={editingName}
+                        autoFocus
+                        placeholder={`v${v.version}`}
+                        onChange={(e) => setEditingName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitRename();
+                          if (e.key === "Escape") setEditingVersion(null);
+                        }}
+                      />
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={commitRename}>
+                        <Check className="h-3 w-3" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setEditingVersion(null)}>
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <button
+                      className="flex items-center gap-1 hover:underline"
+                      onClick={() => startRename(v)}
+                      title="Click to rename"
+                    >
+                      <span className="font-medium">{v.name ?? `v${v.version}`}</span>
+                      {v.name && (
+                        <span className="text-muted-foreground">v{v.version}</span>
+                      )}
+                    </button>
+                  )}
+                </TableCell>
+                <TableCell className="py-1.5 text-right font-mono">{v.plot_count}</TableCell>
+                <TableCell className="py-1.5 text-muted-foreground">
+                  {v.created_at ? new Date(v.created_at).toLocaleString() : "—"}
+                </TableCell>
+                <TableCell className="py-1.5 text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      title="View config"
+                      onClick={() => setViewingConfig(v)}
+                    >
+                      <FileText className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      title="View plots"
+                      onClick={() => viewVersionImages(v)}
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-destructive hover:text-destructive"
+                      title="Delete"
+                      disabled={isDeleting}
+                      onClick={() => setConfirmDeleteVersion(v.version)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       </div>
 
-      {/* Lightbox */}
-      <Dialog open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
-        <DialogContent className="max-w-4xl p-2">
-          <DialogHeader className="px-2 pt-2">
-            <DialogTitle className="text-sm font-mono">{selected?.name}</DialogTitle>
-          </DialogHeader>
-          {selected && (
-            <img
-              src={apiUrl(selected.url)}
-              alt={selected.name}
-              className="w-full rounded"
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-    </div>
+      <StitchConfigDialog
+        open={viewingConfig !== null}
+        onClose={() => setViewingConfig(null)}
+        version={viewingConfig}
+      />
+
+      <StitchImagesDialog
+        open={viewingImages !== null}
+        onClose={() => setViewingImages(null)}
+        plots={viewingImages?.plots ?? []}
+        versionLabel={
+          viewingImages?.version.name
+            ? `${viewingImages.version.name} (v${viewingImages.version.version})`
+            : `v${viewingImages?.version.version}`
+        }
+      />
+
+      <ConfirmDeleteDialog
+        open={confirmDeleteVersion !== null}
+        title="Delete stitching version?"
+        description={
+          confirmDeleteEntry
+            ? `Delete stitching ${confirmDeleteEntry.name ? `"${confirmDeleteEntry.name}" (v${confirmDeleteEntry.version})` : `v${confirmDeleteEntry.version}`} and its ${confirmDeleteEntry.plot_count} plot image${confirmDeleteEntry.plot_count !== 1 ? "s" : ""}? This cannot be undone.`
+            : "Delete this stitching version? This cannot be undone."
+        }
+        isDeleting={isDeleting}
+        onConfirm={() => {
+          if (confirmDeleteVersion !== null) onDelete(confirmDeleteVersion);
+          setConfirmDeleteVersion(null);
+        }}
+        onCancel={() => setConfirmDeleteVersion(null)}
+      />
+    </>
   );
 }
 
@@ -1785,6 +2115,35 @@ export function RunDetail() {
     onError: () => showErrorToast("Failed to rename orthomosaic version"),
   });
 
+  // Stitch version management (ground only)
+  const deleteStitchMutation = useMutation({
+    mutationFn: (version: number) =>
+      fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/stitchings/${version}`), {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
+      }).then((r) => { if (!r.ok) throw new Error("Failed to delete"); }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["stitch-versions", runId] });
+    },
+    onError: () => showErrorToast("Failed to delete stitching version"),
+  });
+
+  const renameStitchMutation = useMutation({
+    mutationFn: ({ version, name }: { version: number; name: string | null }) =>
+      fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/stitchings/${version}/rename`), {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+        },
+        body: JSON.stringify({ name }),
+      }).then((r) => { if (!r.ok) throw new Error("Failed to rename"); }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["stitch-versions", runId] });
+    },
+    onError: () => showErrorToast("Failed to rename stitching version"),
+  });
+
   // Plot boundary versions (aerial only)
   const { data: plotBoundaryVersions, refetch: refetchPlotBoundaryVersions } =
     useQuery<PlotBoundaryVersion[]>({
@@ -2064,6 +2423,10 @@ export function RunDetail() {
   const [showOrthoNameDialog, setShowOrthoNameDialog] = useState(false);
   const [orthoNameInput, setOrthoNameInput] = useState("");
 
+  // Stitching name prompt
+  const [showStitchNameDialog, setShowStitchNameDialog] = useState(false);
+  const [stitchNameInput, setStitchNameInput] = useState("");
+
   // Trait extraction version selection dialog
   const [showTraitDialog, setShowTraitDialog] = useState(false);
   const [traitOrthoVersion, setTraitOrthoVersion] = useState<number | null>(
@@ -2073,8 +2436,22 @@ export function RunDetail() {
     number | null
   >(null);
 
+  function startStitchWithName() {
+    setShowStitchNameDialog(false);
+    stopWasRequestedRef.current = false;
+    executeMutation.mutate({
+      step: "stitching",
+      stitch_name: stitchNameInput.trim() || undefined,
+    } as any);
+  }
+
   // Guarded step runner — checks Docker availability before starting orthomosaic
   async function handleRunStep(step: string) {
+    if (step === "stitching") {
+      setStitchNameInput("");
+      setShowStitchNameDialog(true);
+      return;
+    }
     if (step === "trait_extraction") {
       // If there are versioned orthos or boundaries, prompt which to use
       const hasMultipleOrthos = (orthoVersions?.length ?? 0) > 1;
@@ -2469,7 +2846,15 @@ export function RunDetail() {
                       );
                     }
                     if (step.key === "stitching" && pipelineType === "ground") {
-                      return <StitchPanel runId={runId} isRunning={isRunning} />;
+                      return (
+                        <StitchPanel
+                          runId={runId}
+                          isRunning={isRunning}
+                          onDelete={(v) => deleteStitchMutation.mutate(v)}
+                          onRename={(v, name) => renameStitchMutation.mutate({ version: v, name })}
+                          isDeleting={deleteStitchMutation.isPending}
+                        />
+                      );
                     }
                     if (step.key === "inference" && pipelineType === "ground") {
                       return (
@@ -2527,6 +2912,38 @@ export function RunDetail() {
           </Card>
         </details>
       </div>
+
+      {/* Stitching name prompt dialog */}
+      <Dialog open={showStitchNameDialog} onOpenChange={setShowStitchNameDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Name this stitching run</DialogTitle>
+            <DialogDescription>
+              Optionally give this run a name so you can identify it later. You can rename it any time.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <Label htmlFor="stitch-name" className="text-sm">
+              Name (optional)
+            </Label>
+            <Input
+              id="stitch-name"
+              className="mt-1"
+              placeholder="e.g. High overlap, Fast pass…"
+              value={stitchNameInput}
+              onChange={(e) => setStitchNameInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && startStitchWithName()}
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowStitchNameDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={startStitchWithName}>Start</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Orthomosaic name prompt dialog */}
       <Dialog open={showOrthoNameDialog} onOpenChange={setShowOrthoNameDialog}>

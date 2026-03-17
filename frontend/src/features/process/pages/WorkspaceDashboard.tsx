@@ -191,7 +191,7 @@ export function WorkspaceDashboard() {
                   </p>
                 )}
                 <p className="text-muted-foreground text-[11px] mt-2">
-                  {new Date(workspace.created_at).toLocaleDateString()}
+                  Created on: {new Date(workspace.created_at).toLocaleDateString()}
                 </p>
               </div>
             ))}

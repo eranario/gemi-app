@@ -107,8 +107,8 @@ class ExecuteStepRequest(BaseModel):
     step: str
     # Multi-model inference config
     models: list[ModelConfig] = []
-    # Stitching version override (optional)
-    agrowstitch_version: int = 1
+    # Stitching run name (ground only, optional)
+    stitch_name: str | None = None
     # Orthomosaic run name (aerial only, optional)
     ortho_name: str | None = None
     # Trait extraction version overrides (aerial only, optional)
@@ -140,11 +140,11 @@ def execute_step(
         dispatch: dict[str, Any] = {
             "stitching": (
                 ground.run_stitching,
-                {"agrowstitch_version": body.agrowstitch_version},
+                {"name": body.stitch_name},
             ),
             "georeferencing": (
                 ground.run_georeferencing,
-                {"agrowstitch_version": body.agrowstitch_version},
+                {},
             ),
             "associate_boundaries": (
                 plot_boundary.run_associate_boundaries,
@@ -154,7 +154,6 @@ def execute_step(
                 ground.run_inference,
                 {
                     "models": [m.model_dump() for m in body.models],
-                    "agrowstitch_version": body.agrowstitch_version,
                 },
             ),
         }
@@ -1996,7 +1995,119 @@ def inference_results(
     }
 
 
-# ── Ground: stitching outputs ─────────────────────────────────────────────────
+# ── Ground: stitching version management ─────────────────────────────────────
+
+@router.get("/pipeline-runs/{id}/stitchings")
+def list_stitchings(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+) -> list[dict]:
+    """Return all stitching versions stored in run.outputs['stitchings']."""
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+    stitchings = list((run.outputs or {}).get("stitchings", []))
+
+    # Backward-compat: synthesize a v1 entry from flat stitching_version key
+    if not stitchings and (run.outputs or {}).get("stitching_version"):
+        version = int(run.outputs["stitching_version"])
+        img_dir = paths.agrowstitch_dir(version)
+        count = len(list(img_dir.glob("*.png"))) if img_dir.exists() else 0
+        stitchings = [{
+            "version": version,
+            "name": None,
+            "dir": str(paths.rel(img_dir)),
+            "config": {},
+            "plot_count": count,
+            "created_at": None,
+        }]
+
+    # Annotate each entry with plot count and image URLs
+    result = []
+    for s in stitchings:
+        img_dir = paths.agrowstitch_dir(s["version"])
+        plot_count = s.get("plot_count") or (len(list(img_dir.glob("*.png"))) if img_dir.exists() else 0)
+        result.append({**s, "plot_count": plot_count})
+
+    return sorted(result, key=lambda s: s["version"], reverse=True)
+
+
+class RenameStitchingRequest(BaseModel):
+    name: str | None = None
+
+
+@router.patch("/pipeline-runs/{id}/stitchings/{version}/rename")
+def rename_stitching(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    version: int,
+    body: RenameStitchingRequest,
+) -> dict[str, Any]:
+    run = _get_run_or_404(session, id)
+    outputs = run.outputs or {}
+    stitchings = list(outputs.get("stitchings", []))
+    # Backward-compat: synthesize entry from flat stitching_version key
+    if not stitchings and outputs.get("stitching_version") and int(outputs["stitching_version"]) == version:
+        stitchings = [{"version": version, "name": None, "config": {}, "plot_count": 0, "created_at": None, "dir": ""}]
+    entry = next((s for s in stitchings if s["version"] == version), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Stitching v{version} not found")
+    entry["name"] = body.name or None
+    existing = dict(outputs)
+    existing["stitchings"] = stitchings
+    update_pipeline_run(
+        session=session,
+        db_run=run,
+        run_in=PipelineRunUpdate(outputs=existing),
+    )
+    return {"ok": True}
+
+
+@router.delete("/pipeline-runs/{id}/stitchings/{version}")
+def delete_stitching(
+    session: SessionDep,
+    current_user: CurrentUser,
+    id: uuid.UUID,
+    version: int,
+) -> dict[str, Any]:
+    run = _get_run_or_404(session, id)
+    paths = _get_paths(session, run)
+    outputs = run.outputs or {}
+    stitchings = list(outputs.get("stitchings", []))
+
+    # Backward-compat: if no stitchings list but flat stitching_version exists, treat it as v1
+    if not stitchings and outputs.get("stitching_version") and int(outputs["stitching_version"]) == version:
+        stitchings = [{"version": version}]
+
+    entry = next((s for s in stitchings if s["version"] == version), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Stitching v{version} not found")
+
+    # Delete directory
+    img_dir = paths.agrowstitch_dir(version)
+    if img_dir.exists():
+        import shutil as _shutil
+        _shutil.rmtree(img_dir, ignore_errors=True)
+
+    # Remove from list
+    stitchings = [s for s in stitchings if s["version"] != version]
+    existing = dict(outputs)
+    existing["stitchings"] = stitchings
+    # Update stitching_version to the latest remaining if we deleted the active one
+    active_version = int(existing.get("stitching_version", version))
+    if active_version == version:
+        remaining = sorted(stitchings, key=lambda s: s["version"])
+        existing["stitching_version"] = remaining[-1]["version"] if remaining else None
+    update_pipeline_run(
+        session=session,
+        db_run=run,
+        run_in=PipelineRunUpdate(outputs=existing),
+    )
+    return {"ok": True}
+
+
+# ── Ground: stitching outputs (live during run) ───────────────────────────────
 
 @router.get("/pipeline-runs/{id}/stitch-outputs")
 def get_stitch_outputs(
@@ -2005,8 +2116,8 @@ def get_stitch_outputs(
     id: uuid.UUID,
 ) -> dict[str, Any]:
     """
-    Return the list of stitched plot images produced by AgRowStitch.
-    Each entry has a name and a serve URL.
+    Return stitched plot images for the active stitching version.
+    Polled during a run to show plots as they complete.
     """
     run = _get_run_or_404(session, id)
     paths = _get_paths(session, run)

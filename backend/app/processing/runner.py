@@ -217,6 +217,14 @@ def run_step_in_background(
                 existing_outputs = dict(run.outputs or {})
                 outputs = dict(outputs or {})
 
+                # Stitching versioning: append new entry to the list
+                if "_stitch_new_entry" in outputs:
+                    new_entry = outputs.pop("_stitch_new_entry")
+                    existing_list = list(existing_outputs.get("stitchings", []))
+                    existing_list = [s for s in existing_list if s["version"] != new_entry["version"]]
+                    existing_list.append(new_entry)
+                    existing_outputs["stitchings"] = existing_list
+
                 # Orthomosaic versioning: append new entry to the list instead of overwriting
                 if "_ortho_new_entry" in outputs:
                     new_entry = outputs.pop("_ortho_new_entry")
