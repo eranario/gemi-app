@@ -181,6 +181,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: frontend/src-tauri
+          prefix-key: "v2"
 
       # ── Build PyInstaller backend sidecar ─────────────────────────────────────
       - name: Build backend sidecar (Unix)
