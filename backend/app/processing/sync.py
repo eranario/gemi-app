@@ -434,49 +434,84 @@ def run_data_sync(
       - Intermediate/.../msgs_synced.csv
       - Intermediate/.../drone_msgs.csv  (if platform log found)
       - Intermediate/.../geo.txt
+
+    Priority for msgs_synced.csv:
+      If Raw/.../Metadata/msgs_synced.csv exists (user-uploaded), it is used
+      directly and EXIF extraction + platform log parsing are skipped entirely.
+      To fall back to auto-generation, delete the file from Metadata/.
     """
     paths = _get_paths(session, run_id)
     paths.intermediate_run.mkdir(parents=True, exist_ok=True)
 
     emit({"type": "progress", "step": "data_sync", "message": "Starting data sync…", "pct": 0})
 
-    # 1. EXIF extraction from drone images
-    image_dir = _find_image_dir(paths)
-    if not image_dir.exists():
-        raise FileNotFoundError(
-            f"No image directory found at {image_dir}. "
-            "Upload drone images before running Data Sync."
-        )
+    # ── Step 1: Determine base msgs_synced.csv (priority order) ──────────────
+    #
+    #  1. Intermediate/.../msgs_synced.csv  — already generated (previous run)
+    #  2. Raw/.../Metadata/msgs_synced.csv  — user-uploaded pre-synced file
+    #  3. Auto-generate from drone image EXIF
+    #
+    # Regardless of source, platform logs are still parsed and merged if present.
 
-    df_msgs = _build_msgs_synced(image_dir, paths.msgs_synced, emit)
+    user_msgs_synced = paths.raw_metadata / "msgs_synced.csv"
+    msgs_synced_source: str
+
+    if paths.msgs_synced.exists():
+        emit({"type": "progress", "step": "data_sync",
+              "message": "Found existing msgs_synced.csv in Intermediate — skipping EXIF extraction.", "pct": 45})
+        df_msgs = pd.read_csv(paths.msgs_synced)
+        msgs_synced_source = "intermediate"
+        logger.info("Loaded existing msgs_synced.csv from Intermediate (%d rows)", len(df_msgs))
+
+    elif user_msgs_synced.exists():
+        emit({"type": "progress", "step": "data_sync",
+              "message": "Found user-provided msgs_synced.csv in Metadata/ — skipping EXIF extraction.", "pct": 45})
+        df_msgs = pd.read_csv(user_msgs_synced)
+        df_msgs.to_csv(paths.msgs_synced, index=False)
+        msgs_synced_source = "user-provided"
+        logger.info("Loaded user-provided msgs_synced.csv from Metadata/ (%d rows)", len(df_msgs))
+
+    else:
+        image_dir = _find_image_dir(paths)
+        if not image_dir.exists():
+            raise FileNotFoundError(
+                f"No image directory found at {image_dir}. "
+                "Upload drone images before running Data Sync."
+            )
+        df_msgs = _build_msgs_synced(image_dir, paths.msgs_synced, emit)
+        msgs_synced_source = "exif"
 
     if stop_event.is_set():
         raise RuntimeError("Stopped by user")
 
-    # 2. MAVLink platform log parsing
+    # ── Step 2: MAVLink platform log parsing (always attempted) ──────────────
     df_drone = _build_drone_msgs(paths.raw_metadata, paths.drone_msgs, emit)
 
     if stop_event.is_set():
         raise RuntimeError("Stopped by user")
 
-    # 3. Merge drone GPS into msgs_synced
+    # ── Step 3: Merge drone GPS into msgs_synced ──────────────────────────────
     if df_drone is not None and not df_drone.empty:
-        emit({"type": "progress", "step": "data_sync", "message": "Merging platform log GPS into image manifest…", "pct": 70})
+        emit({"type": "progress", "step": "data_sync",
+              "message": "Merging platform log GPS into image manifest…", "pct": 70})
         df_msgs = _merge_drone_gps(df_msgs, df_drone)
         df_msgs.to_csv(paths.msgs_synced, index=False)
 
-    # 4. Write geo.txt
+    # ── Step 4: Write geo.txt ─────────────────────────────────────────────────
     emit({"type": "progress", "step": "data_sync", "message": "Writing geo.txt for ODM…", "pct": 90})
     n_written = _write_geo_txt(df_msgs, paths.geo_txt)
-    emit({"type": "progress", "step": "data_sync", "message": f"geo.txt written ({n_written} images with GPS)", "pct": 95})
+    emit({"type": "progress", "step": "data_sync",
+          "message": f"geo.txt written ({n_written} images with GPS)", "pct": 95})
 
     logger.info(
-        "Data sync complete for run %s: %d images, %d drone log records, %d geo entries",
-        run_id, len(df_msgs), len(df_drone) if df_drone is not None else 0, n_written,
+        "Data sync complete for run %s (source=%s): %d images, %d drone log records, %d geo entries",
+        run_id, msgs_synced_source, len(df_msgs),
+        len(df_drone) if df_drone is not None else 0, n_written,
     )
 
     outputs: dict[str, Any] = {
         "msgs_synced": paths.rel(paths.msgs_synced),
+        "msgs_synced_source": msgs_synced_source,
         "geo_txt": paths.rel(paths.geo_txt),
     }
     if df_drone is not None:

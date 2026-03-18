@@ -172,9 +172,9 @@ jobs:
         shell: bash
         run: |
           uv run pyinstaller --clean gemi-backend.spec
-          mkdir -p ../frontend/src-tauri/binaries
-          cp dist/gemi-backend ../frontend/src-tauri/binaries/gemi-backend-${{ matrix.target-triple }}
-          echo "Backend binary size: $(du -sh dist/gemi-backend | cut -f1)"
+          mkdir -p ../frontend/src-tauri/binaries/gemi-backend
+          cp -r dist/gemi-backend/. ../frontend/src-tauri/binaries/gemi-backend/
+          echo "Backend bundle size: $(du -sh dist/gemi-backend | cut -f1)"
 
       - name: Build backend sidecar (Windows)
         if: runner.os == 'Windows'
@@ -183,9 +183,9 @@ jobs:
         run: |
           uv run pyinstaller --clean gemi-backend.spec
           New-Item -ItemType Directory -Force -Path ../frontend/src-tauri/binaries | Out-Null
-          Copy-Item dist/gemi-backend.exe ../frontend/src-tauri/binaries/gemi-backend-${{ matrix.target-triple }}.exe
-          $size = (Get-Item dist/gemi-backend.exe).Length / 1MB
-          Write-Host "Backend binary size: $([math]::Round($size, 1)) MB"
+          Copy-Item -Path dist/gemi-backend -Destination ../frontend/src-tauri/binaries/gemi-backend -Recurse
+          $size = (Get-ChildItem -Path dist/gemi-backend -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB
+          Write-Host "Backend bundle size: $([math]::Round($size, 1)) MB"
 
       # ── Build Tauri app ───────────────────────────────────────────────────────
       - name: Build Tauri app

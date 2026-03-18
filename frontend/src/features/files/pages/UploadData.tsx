@@ -2,14 +2,22 @@ import { useCallback, useState } from "react";
 import { FilesService } from "@/client";
 import { DataStructureForm, DataTypes, UploadList } from "../components";
 import { GeoTiffValidationDialog } from "../components/GeoTiffValidationDialog";
+import { MsgsSyncedUploadDialog } from "../components/MsgsSyncedUploadDialog";
+import { Button } from "@/components/ui/button";
+import useCustomToast from "@/hooks/useCustomToast";
 
 export function UploadData() {
   const [selectedFileType, setSelectedFileType] = useState<string | null>(null);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [pendingValidation, setPendingValidation] = useState<string[]>([]);
+  const [msgsSyncedDialogOpen, setMsgsSyncedDialogOpen] = useState(false);
+  const [msgsSyncedSaved, setMsgsSyncedSaved] = useState<number | null>(null);
+  const { showSuccessToast } = useCustomToast();
 
   const handleFormChange = (field: string, value: string) => {
     setFormValues((prev) => ({ ...prev, [field]: value }));
+    // Reset msgs_synced saved state when the path changes
+    setMsgsSyncedSaved(null);
   };
 
   const handleFilesSelected = useCallback(
@@ -62,6 +70,27 @@ export function UploadData() {
             onFilesSelected={handleFilesSelected}
             onUploadComplete={handleUploadComplete}
           />
+
+          {selectedFileType === "Platform Logs" && (
+            <div className="rounded-lg border p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">msgs_synced.csv (optional)</p>
+                  <p className="text-xs text-muted-foreground">
+                    Upload a pre-synced image GPS manifest to skip EXIF extraction during Data Sync.
+                    Platform logs will still be merged on top if present.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setMsgsSyncedDialogOpen(true)}
+                >
+                  {msgsSyncedSaved !== null ? `Saved (${msgsSyncedSaved} rows)` : "Upload CSV"}
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -71,6 +100,16 @@ export function UploadData() {
           onClose={() => setPendingValidation([])}
         />
       )}
+
+      <MsgsSyncedUploadDialog
+        open={msgsSyncedDialogOpen}
+        onClose={() => setMsgsSyncedDialogOpen(false)}
+        onSaved={(rowCount) => {
+          setMsgsSyncedSaved(rowCount);
+          showSuccessToast(`msgs_synced.csv saved (${rowCount} rows)`);
+        }}
+        formValues={formValues}
+      />
     </div>
   );
 }

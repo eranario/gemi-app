@@ -1,12 +1,13 @@
+use std::io::{BufRead, BufReader};
 use std::net::TcpListener;
+use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
-use tauri_plugin_shell::process::CommandChild;
-use tauri_plugin_shell::ShellExt;
+use tauri::Manager;
 
 pub struct SidecarManager {
-    process: Mutex<Option<CommandChild>>,
+    process: Mutex<Option<Child>>,
     port: Mutex<u16>,
 }
 
@@ -32,7 +33,10 @@ impl SidecarManager {
         *self.port.lock().unwrap()
     }
 
-    /// Start the backend sidecar on a free port.
+    /// Start the backend on a free port.
+    ///
+    /// The backend is bundled as a --onedir PyInstaller directory placed in the
+    /// Tauri resources folder.  We locate it via `app.path().resource_dir()`.
     pub fn start(&self, app: &tauri::AppHandle) -> Result<u16, String> {
         let mut process_guard = self.process.lock().unwrap();
 
@@ -43,42 +47,52 @@ impl SidecarManager {
         let port = Self::find_free_port();
         *self.port.lock().unwrap() = port;
 
-        println!("Starting backend sidecar on port {}...", port);
+        let resource_dir = app
+            .path()
+            .resource_dir()
+            .map_err(|e| format!("Failed to get resource dir: {}", e))?;
 
-        let sidecar = app
-            .shell()
-            .sidecar("gemi-backend")
-            .map_err(|e| format!("Failed to create sidecar command: {}", e))?
-            .env("GEMI_BACKEND_PORT", port.to_string());
+        let binary_name = if cfg!(target_os = "windows") {
+            "gemi-backend.exe"
+        } else {
+            "gemi-backend"
+        };
 
-        let (mut rx, child) = sidecar
+        let binary_path = resource_dir.join("gemi-backend").join(binary_name);
+
+        println!("Starting backend at {:?} on port {}...", binary_path, port);
+
+        let mut child = Command::new(&binary_path)
+            .env("GEMI_BACKEND_PORT", port.to_string())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| format!("Failed to spawn sidecar: {}", e))?;
+            .map_err(|e| format!("Failed to spawn backend {:?}: {}", binary_path, e))?;
 
-        tauri::async_runtime::spawn(async move {
-            use tauri_plugin_shell::process::CommandEvent;
-            while let Some(event) = rx.recv().await {
-                match event {
-                    CommandEvent::Stdout(line) => {
-                        println!("[backend] {}", String::from_utf8_lossy(&line));
+        if let Some(stdout) = child.stdout.take() {
+            thread::spawn(move || {
+                for line in BufReader::new(stdout).lines() {
+                    match line {
+                        Ok(l) => println!("[backend] {}", l),
+                        Err(_) => break,
                     }
-                    CommandEvent::Stderr(line) => {
-                        eprintln!("[backend] {}", String::from_utf8_lossy(&line));
-                    }
-                    CommandEvent::Error(err) => {
-                        eprintln!("[backend error] {}", err);
-                    }
-                    CommandEvent::Terminated(status) => {
-                        println!("[backend] Process terminated: {:?}", status);
-                        break;
-                    }
-                    _ => {}
                 }
-            }
-        });
+            });
+        }
+
+        if let Some(stderr) = child.stderr.take() {
+            thread::spawn(move || {
+                for line in BufReader::new(stderr).lines() {
+                    match line {
+                        Ok(l) => eprintln!("[backend] {}", l),
+                        Err(_) => break,
+                    }
+                }
+            });
+        }
 
         *process_guard = Some(child);
-        println!("Backend sidecar started on port {}", port);
+        println!("Backend started on port {}", port);
         Ok(port)
     }
 
@@ -103,12 +117,12 @@ impl SidecarManager {
         Err(format!("Backend on port {} failed to become healthy", port))
     }
 
-    /// Stop the backend sidecar.
+    /// Stop the backend process.
     pub fn stop(&self) -> Result<(), String> {
         let mut process_guard = self.process.lock().unwrap();
-        if let Some(child) = process_guard.take() {
-            println!("Stopping backend sidecar...");
-            child.kill().map_err(|e| format!("Failed to kill sidecar: {}", e))?;
+        if let Some(mut child) = process_guard.take() {
+            println!("Stopping backend...");
+            child.kill().map_err(|e| format!("Failed to kill backend: {}", e))?;
         }
         Ok(())
     }

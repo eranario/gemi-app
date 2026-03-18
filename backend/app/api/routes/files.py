@@ -631,6 +631,47 @@ def _copy_local_stream(
     )
 
 
+class SaveMsgsSyncedRequest(BaseModel):
+    csv_text: str
+    experiment: str
+    location: str
+    population: str
+    date: str
+    platform: str
+
+
+@router.post("/msgs-synced")
+def save_msgs_synced(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    body: SaveMsgsSyncedRequest,
+) -> dict[str, Any]:
+    """
+    Save a user-provided msgs_synced.csv to Raw/.../Metadata/msgs_synced.csv.
+
+    This file takes priority over EXIF extraction during the aerial Data Sync step.
+    Delete it from Metadata/ to revert to auto-generation.
+    """
+    import csv as _csv
+    import io as _io
+
+    data_root = Path(get_setting(session=session, key="data_root") or settings.APP_DATA_ROOT)
+    year = body.date.split("-")[0] if "-" in body.date else body.date
+    target_dir = (
+        data_root / "Raw" / year
+        / body.experiment / body.location / body.population
+        / body.date / body.platform / "Metadata"
+    )
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / "msgs_synced.csv"
+    target.write_text(body.csv_text)
+
+    rows = list(_csv.DictReader(_io.StringIO(body.csv_text)))
+    logger.info("Saved user msgs_synced.csv → %s (%d rows)", target, len(rows))
+    return {"status": "saved", "row_count": len(rows)}
+
+
 @router.post("/copy-local-stream")
 def copy_local_files_stream(
     session: SessionDep,
