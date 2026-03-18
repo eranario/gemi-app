@@ -39,6 +39,11 @@ jobs:
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
           sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/lib/jvm
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/lib/mono
+          sudo rm -rf /usr/local/share/powershell
           sudo docker image prune --all --force || true
           df -h
 
@@ -187,6 +192,9 @@ jobs:
           mkdir -p ../frontend/src-tauri/binaries/gemi-backend
           cp -r dist/gemi-backend/. ../frontend/src-tauri/binaries/gemi-backend/
           echo "Backend bundle size: $(du -sh dist/gemi-backend | cut -f1)"
+          # Free space before the Rust build — dist/ and venv are no longer needed
+          rm -rf dist build .venv
+          df -h
 
       - name: Build backend sidecar (Windows)
         if: runner.os == 'Windows'
@@ -198,6 +206,8 @@ jobs:
           Copy-Item -Path dist/gemi-backend -Destination ../frontend/src-tauri/binaries/gemi-backend -Recurse
           $size = (Get-ChildItem -Path dist/gemi-backend -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB
           Write-Host "Backend bundle size: $([math]::Round($size, 1)) MB"
+          # Free space before the Rust build
+          Remove-Item -Recurse -Force dist, build, .venv -ErrorAction SilentlyContinue
 
       # ── Build Tauri app ───────────────────────────────────────────────────────
       - name: Build Tauri app
