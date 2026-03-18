@@ -118,7 +118,7 @@ jobs:
           git submodule update --init --recursive
           sed -i '' 's/"-Werror",//g' setup.py
           cd $GITHUB_WORKSPACE/backend
-          uv pip install setuptools farm-ng-package
+          uv pip install setuptools farm-ng-package pybind11 cmake ninja scikit-build
           uv pip install --no-build-isolation /tmp/farm-ng-core
 
       - name: Build farm-ng-core from source (Windows)
@@ -131,7 +131,7 @@ jobs:
           git submodule update --init --recursive
           (Get-Content setup.py) -replace '"-Werror",', '' -replace '"/WX",', '' | Set-Content setup.py
           cd $env:GITHUB_WORKSPACE\backend
-          uv pip install setuptools farm-ng-package
+          uv pip install setuptools farm-ng-package pybind11 cmake ninja scikit-build
           uv pip install --no-build-isolation $env:RUNNER_TEMP\farm-ng-core
 
       # ── Vendor packages ───────────────────────────────────────────────────────
