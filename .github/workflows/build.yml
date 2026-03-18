@@ -129,7 +129,13 @@ jobs:
           git clone --depth 1 --branch v2.3.0 https://github.com/farm-ng/farm-ng-core.git $env:RUNNER_TEMP\farm-ng-core
           cd $env:RUNNER_TEMP\farm-ng-core
           git submodule update --init --recursive
-          (Get-Content setup.py) -replace '"-Werror",', '' -replace '"/WX",', '' | Set-Content setup.py
+          $content = Get-Content setup.py -Raw
+          $content = $content -replace '"-Werror",\s*', ''
+          $content = $content -replace '"/WX",\s*', ''
+          $content = $content -replace '"-Wall",\s*', ''
+          $content = $content -replace '"-Wextra",\s*', ''
+          $content = $content -replace '"-Wno-[^"]*",\s*', ''
+          Set-Content setup.py $content
           cd $env:GITHUB_WORKSPACE\backend
           uv pip install setuptools farm-ng-package pybind11 cmake ninja scikit-build
           uv pip install --no-build-isolation $env:RUNNER_TEMP\farm-ng-core
