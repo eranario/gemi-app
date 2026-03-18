@@ -44,6 +44,11 @@ jobs:
           sudo rm -rf /usr/share/swift
           sudo rm -rf /usr/lib/mono
           sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /home/linuxbrew/.linuxbrew
+          sudo rm -rf /opt/az
+          sudo rm -rf /usr/local/aws-cli
+          sudo rm -rf /usr/local/aws-sam-cli
+          sudo rm -rf /usr/share/miniconda
           sudo docker image prune --all --force || true
           df -h
 
@@ -161,6 +166,13 @@ jobs:
           # farm-ng-amiga: attempt after the source build above; non-fatal
           uv pip install --no-build-isolation farm-ng-amiga || echo "WARNING: farm-ng-amiga install failed (no Windows wheels)"
 
+      # Drop the uv download cache — the venv is already built and cached separately.
+      # On Linux this can be 1-3 GB of wheel/sdist downloads we no longer need.
+      - name: Clean uv cache (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: uv cache clean || true
+
       # ── Node.js ───────────────────────────────────────────────────────────────
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -216,6 +228,8 @@ jobs:
         run: npx tauri build
         env:
           NO_AT_BRIDGE: "1"
+          CARGO_INCREMENTAL: "0"
+          RUSTFLAGS: "-C debuginfo=0"
 
       # ── Upload installer artifact ─────────────────────────────────────────────
       - name: Upload installer
