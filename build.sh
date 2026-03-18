@@ -29,30 +29,24 @@ build_backend() {
 
     cd "$BACKEND_DIR"
 
-    # Ensure PyInstaller is available in the venv
-    if ! .venv/bin/python -c "import PyInstaller" 2>/dev/null; then
-        log "Installing PyInstaller into venv..."
-        uv pip install pyinstaller
-    fi
-
     # Install vendor packages (submodules) into venv
     if [[ -d "vendor/AgRowStitch" ]]; then
         log "Installing AgRowStitch from vendor/..."
-        .venv/bin/pip install -e vendor/AgRowStitch --no-build-isolation
+        uv pip install -e vendor/AgRowStitch --no-build-isolation
     else
         log "WARNING: vendor/AgRowStitch not found — stitching will not be available"
     fi
 
     if [[ -d "vendor/LightGlue" ]]; then
         log "Installing LightGlue from vendor/..."
-        .venv/bin/pip install vendor/LightGlue
+        uv pip install vendor/LightGlue
     else
         log "WARNING: vendor/LightGlue not found — AgRowStitch matching may fail"
     fi
 
     if [[ -d "vendor/bin_to_images" ]]; then
         log "Installing bin_to_images from vendor/..."
-        .venv/bin/pip install -e vendor/bin_to_images
+        uv pip install -e vendor/bin_to_images
     else
         log "WARNING: vendor/bin_to_images not found — Amiga .bin extraction unavailable"
     fi
@@ -63,13 +57,16 @@ build_backend() {
         log "macOS detected: building farm-ng-core from source (required for farm-ng-amiga)..."
         FARM_NG_DIR="$(mktemp -d)"
         git clone --depth 1 --branch v2.3.0 https://github.com/farm-ng/farm-ng-core.git "$FARM_NG_DIR/farm-ng-core"
-        sed -i '' 's/"-Werror",//g' "$FARM_NG_DIR/farm-ng-core/setup.py"
-        .venv/bin/pip install "$FARM_NG_DIR/farm-ng-core"
-        .venv/bin/pip install --no-build-isolation farm-ng-amiga
+        cd "$FARM_NG_DIR/farm-ng-core"
+        git submodule update --init --recursive
+        sed -i '' 's/"-Werror",//g' setup.py
+        cd "$BACKEND_DIR"
+        uv pip install "$FARM_NG_DIR/farm-ng-core"
+        uv pip install --no-build-isolation farm-ng-amiga
         rm -rf "$FARM_NG_DIR"
     else
         log "Installing farm-ng-amiga..."
-        .venv/bin/pip install farm-ng-amiga || log "WARNING: farm-ng-amiga install failed — .bin extraction unavailable"
+        uv pip install farm-ng-amiga || log "WARNING: farm-ng-amiga install failed — .bin extraction unavailable"
     fi
 
     uv run pyinstaller --clean gemi-backend.spec
@@ -95,20 +92,13 @@ build_backend() {
 
     log "Target triple: $TARGET_TRIPLE"
 
-    if [[ "$TARGET_TRIPLE" == *windows* ]]; then
-        SRC_BIN="dist/gemi-backend.exe"
-        DEST_NAME="gemi-backend-${TARGET_TRIPLE}.exe"
-    else
-        SRC_BIN="dist/gemi-backend"
-        DEST_NAME="gemi-backend-${TARGET_TRIPLE}"
-    fi
+    SRC_DIR="dist/gemi-backend"
+    [[ -d "$SRC_DIR" ]] || die "PyInstaller output directory not found at $SRC_DIR"
 
-    [[ -f "$SRC_BIN" ]] || die "PyInstaller output not found at $SRC_BIN"
-
-    BINARIES_DIR="$FRONTEND_DIR/src-tauri/binaries"
-    mkdir -p "$BINARIES_DIR"
-    cp "$SRC_BIN" "$BINARIES_DIR/$DEST_NAME"
-    log "Backend binary → $BINARIES_DIR/$DEST_NAME"
+    DEST_DIR="$FRONTEND_DIR/src-tauri/binaries/gemi-backend"
+    mkdir -p "$DEST_DIR"
+    cp -r "$SRC_DIR/." "$DEST_DIR/"
+    log "Backend bundle → $DEST_DIR"
 }
 
 # ── Step 2: Build Tauri app ────────────────────────────────────────────────────
