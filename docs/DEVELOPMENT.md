@@ -14,11 +14,12 @@
 10. [Background Processing and SSE](#background-processing-and-sse)
 11. [Filesystem Layout (RunPaths)](#filesystem-layout-runpaths)
 12. [Installing New Packages](#installing-new-packages)
-13. [Code Style and Linting](#code-style-and-linting)
-14. [Building for Production](#building-for-production)
-15. [Testing the Production Build Locally](#testing-the-production-build-locally)
-16. [Pull Requests and Issues](#pull-requests-and-issues)
-17. [Common Gotchas](#common-gotchas)
+13. [CI Caches](#ci-caches)
+14. [Code Style and Linting](#code-style-and-linting)
+15. [Building for Production](#building-for-production)
+16. [Testing the Production Build Locally](#testing-the-production-build-locally)
+17. [Pull Requests and Issues](#pull-requests-and-issues)
+18. [Common Gotchas](#common-gotchas)
 
 ---
 
@@ -526,7 +527,29 @@ npm install --save-dev <package> # dev dependency
 
 - **Python:** the `uv.lock` file is updated automatically. Commit both `pyproject.toml` and `uv.lock`.
 - **JS:** `package-lock.json` is updated. Commit both `package.json` and `package-lock.json`.
-- **PyInstaller cache:** adding or updating a Python package invalidates the CI bundle cache automatically (the cache key includes `uv.lock`).
+- **PyInstaller cache:** the CI bundle cache is invalidated automatically when `uv.lock`, the `.spec` file, any `app/**/*.py` source, or **the workflow file itself** changes. Changing only the install *method* (e.g. adding a `--index-url`) without touching `uv.lock` is covered because the workflow file hash is included in the cache key.
+
+---
+
+## CI Caches
+
+The GitHub Actions workflow maintains three caches to keep builds fast. Each is keyed so it auto-invalidates when the relevant inputs change.
+
+| Cache | Key inputs | Typical size | Notes |
+|-------|-----------|-------------|-------|
+| **Python venv** (`backend/.venv`) | `pyproject.toml`, `uv.lock`, submodule hashes | 3–5 GB | Shared across jobs for the same OS |
+| **PyInstaller bundle** (`binaries/gemi-backend`) | `uv.lock`, `gemi-backend.spec`, `app/**/*.py`, `hooks/**`, **`build.yml`** | 2–4 GB | Skips the 1–2 h PyInstaller step on cache hit |
+| **Cargo build artifacts** | Rust source + `Cargo.lock` + `prefix-key` | 1–2 GB | Managed by `swatinem/rust-cache`; `prefix-key: "v2"` in `build.yml` |
+
+### When to manually bust a cache
+
+- **PyInstaller bundle:** Normally auto-busts when any listed input changes, including the workflow file. If you need to force a fresh build without changing any source file (rare), bump `prefix-key` in the `swatinem/rust-cache` step or add a dummy comment to `build.yml`.
+- **Cargo:** Bump `prefix-key` (currently `"v2"`) in the `swatinem/rust-cache` step to force a full Rust rebuild (e.g. after a compiler upgrade or if the cache becomes corrupt).
+- **Python venv:** Change any of the key inputs, or delete the cache in the GitHub Actions UI under *Caches*.
+
+### Common symptom: installer size doesn't grow after adding a large package
+
+If you add or switch a large dependency (e.g. changing torch from CPU to CUDA) but the installer size stays the same, the **PyInstaller bundle cache was hit** and the old bundle was reused. Check whether any of the cache key inputs actually changed. If not, add a comment to `build.yml` to force a cache miss.
 
 ---
 
@@ -652,3 +675,4 @@ Open an issue at `https://github.com/your-org/gemi-app/issues` with:
 | Outputs missing after step completes | Path stored as absolute, not relative | Use `paths.rel(path)` before storing in `run.outputs` |
 | `uv sync` succeeds but import fails | Vendor submodule not installed | Run vendor `uv pip install` steps from the setup section |
 | CI bundle cache not invalidating | Changed a Python file outside `app/` | Add the path to the `hashFiles` glob in the cache step |
+| Installer size unchanged after adding a large package | PyInstaller bundle cache hit — old bundle reused | Change any cache key input (e.g. add a comment to `build.yml`) to force a miss; see [CI Caches](#ci-caches) |

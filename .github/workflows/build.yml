@@ -198,7 +198,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: frontend/src-tauri/binaries/gemi-backend
-          key: bundle-${{ matrix.os }}-${{ hashFiles('backend/uv.lock', 'backend/gemi-backend.spec', 'backend/app/**/*.py', 'backend/hooks/**') }}-${{ steps.submodule-hashes.outputs.hashes }}
+          key: bundle-${{ matrix.os }}-${{ hashFiles('backend/uv.lock', 'backend/gemi-backend.spec', 'backend/app/**/*.py', 'backend/hooks/**', '.github/workflows/build.yml') }}-${{ steps.submodule-hashes.outputs.hashes }}
 
       - name: Build backend sidecar (Unix)
         if: runner.os != 'Windows' && steps.cache-bundle.outputs.cache-hit != 'true'
