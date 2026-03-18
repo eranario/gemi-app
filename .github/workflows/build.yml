@@ -121,30 +121,9 @@ jobs:
           uv pip install setuptools farm-ng-package pybind11 cmake ninja scikit-build
           uv pip install --no-build-isolation /tmp/farm-ng-core
 
-      # farm-ng-core: Windows — MSVC cannot build farm-ng-core (uses cxxabi.h).
-      # Try MinGW64 (GCC for Windows) via the pre-installed MSYS2 on GitHub runners.
-      # continue-on-error so an ABI mismatch or build failure falls through gracefully.
-      - name: Build farm-ng-core from source (Windows, MinGW)
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          # Ensure MinGW64 GCC + Ninja are available (MSYS2 is pre-installed on runners)
-          C:\msys64\usr\bin\pacman.exe -S --noconfirm --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-ninja
-          $env:PATH = "C:\msys64\mingw64\bin;$env:PATH"
-          $env:CC  = "C:\msys64\mingw64\bin\gcc.exe"
-          $env:CXX = "C:\msys64\mingw64\bin\g++.exe"
-          $env:CMAKE_GENERATOR = "Ninja"
-
-          git clone --depth 1 --branch v2.3.0 https://github.com/farm-ng/farm-ng-core.git $env:RUNNER_TEMP\farm-ng-core
-          cd $env:RUNNER_TEMP\farm-ng-core
-          git submodule update --init --recursive
-          # Strip -Werror so warnings don't abort the build
-          (Get-Content setup.py) -replace '"-Werror",', '' | Set-Content setup.py
-
-          cd $env:GITHUB_WORKSPACE\backend
-          uv pip install setuptools farm-ng-package pybind11 cmake ninja scikit-build
-          uv pip install --no-build-isolation $env:RUNNER_TEMP\farm-ng-core
+      # farm-ng-core: Windows — MSVC cannot build it (uses cxxabi.h, GCC/Clang only).
+      # MinGW also fails because Visual Studio's environment overrides CC/CXX before uv runs.
+      # On Windows, .bin extraction runs via Docker at runtime instead (see bin_to_images).
 
       # ── Vendor packages ───────────────────────────────────────────────────────
       # Always run so submodule commit changes are picked up even on a cache hit.

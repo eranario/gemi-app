@@ -142,6 +142,17 @@ hiddenimports += collect_submodules('bin_to_images')
 
 # Collect data files for packages that need them at runtime
 datas = []
+
+# Docker build context for Windows .bin extraction — bundled so the app can
+# build the gemi-bin-extractor image automatically on first use.
+datas += [
+    ('docker/bin-extractor/Dockerfile',        'docker/bin-extractor'),
+    ('docker/bin-extractor/run_extraction.py', 'docker/bin-extractor'),
+    # bin_to_images source (no setup.py — copied directly into the Docker context)
+    ('bin_to_images/bin_to_images.py', 'docker/bin-extractor/bin_to_images'),
+    ('bin_to_images/__init__.py',       'docker/bin-extractor/bin_to_images'),
+]
+
 datas += collect_data_files('rasterio')   # bundled GDAL + PROJ data
 datas += collect_data_files('pyproj')     # PROJ database (proj.db)
 datas += collect_data_files('pyogrio')    # bundled GDAL/OGR drivers for GeoJSON I/O

@@ -6,7 +6,7 @@
 #   .\build-windows.ps1 backend  # PyInstaller sidecar only
 #   .\build-windows.ps1 tauri    # Tauri app only (assumes backend already built)
 param(
-    [ValidateSet("all", "backend", "tauri")]
+    [ValidateSet("all", "backend", "tauri", "bin-extractor")]
     [string]$Mode = "all"
 )
 
@@ -77,8 +77,21 @@ function Build-Tauri {
     Log "Done. Installer: $Frontend\src-tauri\target\release\bundle\nsis\"
 }
 
+function Build-BinExtractor {
+    Log "Building gemi-bin-extractor Docker image..."
+    Log "This image is required for .bin file extraction on Windows."
+
+    Set-Location $Backend
+    docker build -t gemi-bin-extractor -f docker/bin-extractor/Dockerfile .
+    if ($LASTEXITCODE -ne 0) {
+        Die "Docker build failed. Make sure Docker Desktop is running and the bin_to_images submodule is checked out."
+    }
+    Log "Docker image 'gemi-bin-extractor' built successfully."
+}
+
 switch ($Mode) {
-    "backend" { Build-Backend }
-    "tauri"   { Build-Tauri }
-    "all"     { Build-Backend; Build-Tauri }
+    "backend"       { Build-Backend }
+    "tauri"         { Build-Tauri }
+    "bin-extractor" { Build-BinExtractor }
+    "all"           { Build-Backend; Build-Tauri; Build-BinExtractor }
 }
