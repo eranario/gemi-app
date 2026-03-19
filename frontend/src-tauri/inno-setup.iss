@@ -14,7 +14,7 @@
 #define AppName      "GEMI"
 #define AppVersion   "1.0.0"
 #define AppPublisher "GEMI"
-#define AppExeName   "GEMI.exe"
+#define AppExeName   "app.exe"
 #define AppId        "com.gemi.app"
 
 [Setup]
