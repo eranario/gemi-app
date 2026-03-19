@@ -66,15 +66,28 @@ function Build-Backend {
 function Build-Tauri {
     Log "Building Tauri application..."
 
+    # Verify Inno Setup is installed
+    $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+    if (-not (Test-Path $iscc)) {
+        Die "Inno Setup 6 not found at '$iscc'. Download from https://jrsoftware.org/isdl.php"
+    }
+
     Set-Location $Frontend
 
     if (-not (Test-Path "node_modules")) { npm install }
 
     $env:CARGO_INCREMENTAL = "0"
     $env:RUSTFLAGS = "-C debuginfo=0"
-    npx tauri build
 
-    Log "Done. Installer: $Frontend\src-tauri\target\release\bundle\nsis\"
+    # --no-bundle skips NSIS, which cannot handle CUDA DLLs (>2 GB mmap limit)
+    npx tauri build --no-bundle
+
+    Log "Creating installer with Inno Setup..."
+    New-Item -ItemType Directory -Force -Path "src-tauri\target\release\bundle\inno" | Out-Null
+    & $iscc "src-tauri\inno-setup.iss"
+    if ($LASTEXITCODE -ne 0) { Die "Inno Setup failed (exit code $LASTEXITCODE)" }
+
+    Log "Done. Installer: $Frontend\src-tauri\target\release\bundle\inno\"
 }
 
 function Build-BinExtractor {

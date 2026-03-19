@@ -124,7 +124,7 @@ except Exception:
     pass
 
 # PyTorch — required by AgRowStitch for image matching
-# CPU-only build (~800 MB) is sufficient; exclude CUDA internals to reduce size
+# CUDA DLLs are stripped post-analysis on Windows (see below) due to NSIS size limits
 try:
     hiddenimports += collect_submodules('torch')
     hiddenimports += collect_submodules('torchvision')
@@ -193,6 +193,7 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
+
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 

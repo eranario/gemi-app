@@ -108,6 +108,8 @@ gemi-app/
 | Node.js 22 | [nodejs.org](https://nodejs.org) or `nvm install 22` |
 | Rust (stable) | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
 
+**Windows only** — install [Inno Setup 6](https://jrsoftware.org/isdl.php) to build the installer. The default install path (`C:\Program Files (x86)\Inno Setup 6\ISCC.exe`) is expected by `build-windows.ps1` and the CI workflow. NSIS is **not** used on Windows — see [CI Caches](#ci-caches) for why.
+
 **Linux only** — install Tauri system dependencies:
 ```bash
 sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
@@ -541,6 +543,18 @@ The GitHub Actions workflow maintains three caches to keep builds fast. Each is 
 | **PyInstaller bundle** (`binaries/gemi-backend`) | `uv.lock`, `gemi-backend.spec`, `app/**/*.py`, `hooks/**`, **`build.yml`** | 2–4 GB | Skips the 1–2 h PyInstaller step on cache hit |
 | **Cargo build artifacts** | Rust source + `Cargo.lock` + `prefix-key` | 1–2 GB | Managed by `swatinem/rust-cache`; `prefix-key: "v2"` in `build.yml` |
 
+### Windows installer: Inno Setup instead of NSIS
+
+The Windows installer is built with **Inno Setup 6**, not NSIS. NSIS has a hard ~2 GB data-block mmap limit (`Internal compiler error #12345`) that CUDA torch DLLs alone exceed. Inno Setup has no such limit.
+
+The CI workflow for Windows:
+1. `npx tauri build --no-bundle` — compiles the Rust binary, skips NSIS
+2. `ISCC.exe inno-setup.iss` — packages `GEMI.exe` + the full `gemi-backend/` sidecar (including CUDA DLLs) into a single installer
+
+The installer script lives at `frontend/src-tauri/inno-setup.iss`. The output is `target/release/bundle/inno/GEMI_<version>_x64-setup.exe`, which matches the `artifact-glob` in `build.yml`.
+
+Inno Setup 6 is pre-installed on GitHub Actions Windows runners. For local Windows builds, install it from [jrsoftware.org/isdl.php](https://jrsoftware.org/isdl.php) — `build-windows.ps1` expects it at the default path.
+
 ### When to manually bust a cache
 
 - **PyInstaller bundle:** Normally auto-busts when any listed input changes, including the workflow file. If you need to force a fresh build without changing any source file (rare), bump `prefix-key` in the `swatinem/rust-cache` step or add a dummy comment to `build.yml`.
@@ -597,6 +611,8 @@ Partial builds (skip PyInstaller if backend hasn't changed):
 ./build-linux.sh tauri    # Tauri only — assumes binaries/gemi-backend/ exists
 ./build-linux.sh backend  # PyInstaller only
 ```
+
+> **Windows note:** `build-windows.ps1` uses Inno Setup 6 (not NSIS) to create the installer. Install it from [jrsoftware.org/isdl.php](https://jrsoftware.org/isdl.php) before running a full Windows build.
 
 ---
 
@@ -676,3 +692,4 @@ Open an issue at `https://github.com/your-org/gemi-app/issues` with:
 | `uv sync` succeeds but import fails | Vendor submodule not installed | Run vendor `uv pip install` steps from the setup section |
 | CI bundle cache not invalidating | Changed a Python file outside `app/` | Add the path to the `hashFiles` glob in the cache step |
 | Installer size unchanged after adding a large package | PyInstaller bundle cache hit — old bundle reused | Change any cache key input (e.g. add a comment to `build.yml`) to force a miss; see [CI Caches](#ci-caches) |
+| Windows NSIS `error mmapping datablock #12345` | CUDA DLLs exceed NSIS's 2 GB data-block limit | Windows uses Inno Setup instead of NSIS — see [CI Caches](#ci-caches) |

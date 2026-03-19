@@ -23,7 +23,7 @@ jobs:
             artifact-name: gemi-macos-arm64
           - os: windows-latest
             target-triple: x86_64-pc-windows-msvc
-            artifact-glob: "frontend/src-tauri/target/release/bundle/nsis/*.exe"
+            artifact-glob: "frontend/src-tauri/target/release/bundle/inno/*.exe"
             artifact-name: gemi-windows-x86_64
 
     runs-on: ${{ matrix.os }}
@@ -262,13 +262,35 @@ jobs:
           Get-PSDrive C | Select-Object -ExpandProperty Free | ForEach-Object { "{0:N2} GB free" -f ($_ / 1GB) }
 
       # ── Build Tauri app ───────────────────────────────────────────────────────
-      - name: Build Tauri app
+      # Windows uses --no-bundle to skip NSIS (which has a ~2 GB data-block
+      # mmap limit that CUDA torch DLLs exceed). Inno Setup runs next instead.
+      - name: Build Tauri app (Unix)
+        if: runner.os != 'Windows'
         working-directory: frontend
         run: npx tauri build
         env:
           NO_AT_BRIDGE: "1"
           CARGO_INCREMENTAL: "0"
           RUSTFLAGS: "-C debuginfo=0"
+
+      - name: Build Tauri app (Windows — no bundle)
+        if: runner.os == 'Windows'
+        working-directory: frontend
+        run: npx tauri build --no-bundle
+        env:
+          CARGO_INCREMENTAL: "0"
+          RUSTFLAGS: "-C debuginfo=0"
+
+      - name: Create installer (Windows — Inno Setup)
+        if: runner.os == 'Windows'
+        working-directory: frontend
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path src-tauri\target\release\bundle\inno | Out-Null
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" src-tauri\inno-setup.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $size = (Get-Item src-tauri\target\release\bundle\inno\*.exe).Length / 1MB
+          Write-Host "Installer size: $([math]::Round($size, 1)) MB"
 
       # ── Upload installer artifact ─────────────────────────────────────────────
       - name: Upload installer
