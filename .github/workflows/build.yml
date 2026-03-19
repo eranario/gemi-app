@@ -56,24 +56,14 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # Remove large pre-installed toolchains and SDKs not needed for this build
-          Remove-Item -Recurse -Force "C:\Program Files\dotnet"               -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\Program Files (x86)\Microsoft SDKs" -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\Program Files\Microsoft SDKs"       -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\Program Files\Android"              -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\hostedtoolcache\windows\CodeQL"     -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\hostedtoolcache\windows\go"         -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\hostedtoolcache\windows\Ruby"       -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\Miniconda"                          -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\ProgramData\Miniconda3"             -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\ProgramData\chocolatey"             -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\Program Files\PostgreSQL"           -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\Program Files\MySQL"                -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\Program Files\MongoDB"              -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\Program Files (x86)\GitHub CLI"     -ErrorAction SilentlyContinue
-          # Report free space
+          uv cache clean | Out-Null
+          # Clear pip cache
+          pip cache purge | Out-Null
+          # Clear PyTorch CUDA wheel cache (can be 3-5 GB)
+          Remove-Item -Recurse -Force "$env:LOCALAPPDATA\pip\Cache"    -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "$env:LOCALAPPDATA\uv\cache"     -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "$env:TEMP\torch_extensions"     -ErrorAction SilentlyContinue
           Get-PSDrive C | Select-Object -ExpandProperty Free | ForEach-Object { "{0:N2} GB free" -f ($_ / 1GB) }
-
       # ── Checkout ─────────────────────────────────────────────────────────────
       - name: Checkout (with submodules)
         uses: actions/checkout@v4
@@ -247,6 +237,9 @@ jobs:
           Write-Host "Backend bundle size: $([math]::Round($size, 1)) MB"
           # Free space before the Rust build
           Remove-Item -Recurse -Force dist, build, .venv -ErrorAction SilentlyContinue
+          # Also nuke npm cache — not needed after frontend deps are installed
+          npm cache clean --force 2>$null
+          Get-PSDrive C | Select-Object -ExpandProperty Free | ForEach-Object { "{0:N2} GB free" -f ($_ / 1GB) }
 
       # ── Build Tauri app ───────────────────────────────────────────────────────
       - name: Build Tauri app
